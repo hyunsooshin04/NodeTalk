@@ -8,6 +8,7 @@ const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || "ws://localhost:3002"
 export class GatewayClient {
   private ws: WebSocket | null = null;
   private roomId: string | null = null;
+  private subscribedDid: string | null = null;
   private onMessageCallback: ((notification: PushNotification) => void) | null = null;
 
   /**
@@ -21,9 +22,12 @@ export class GatewayClient {
     this.ws = new WebSocket(GATEWAY_URL);
 
     this.ws.onopen = () => {
-      console.log("✅ Gateway connected");
+      console.log("Gateway connected");
       if (this.roomId) {
         this.subscribe(this.roomId);
+      }
+      if (this.subscribedDid) {
+        this.subscribeDid(this.subscribedDid);
       }
     };
 
@@ -60,6 +64,16 @@ export class GatewayClient {
   }
 
   /**
+   * DID 구독 (친구 신청 알림용)
+   */
+  subscribeDid(did: string) {
+    this.subscribedDid = did;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "subscribe_did", did }));
+    }
+  }
+
+  /**
    * 새 메시지 알림 콜백 설정
    */
   onMessage(callback: (notification: PushNotification) => void) {
@@ -72,6 +86,9 @@ export class GatewayClient {
   disconnect() {
     if (this.roomId && this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: "unsubscribe", roomId: this.roomId }));
+    }
+    if (this.subscribedDid && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "unsubscribe_did", did: this.subscribedDid }));
     }
     this.ws?.close();
     this.ws = null;

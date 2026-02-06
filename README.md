@@ -19,25 +19,25 @@ NodeTalk는 **AT Protocol(PDS) 위에서 동작하는 완전 분산형(E2EE) 메
 
 ---
 
-## 🚀 Phase 1 구현 완료
+## Phase 1 구현 완료
 
 Phase 1은 **암호화된 DM 1:1 메시지 한 줄 보내기**를 목표로 합니다.
 
 ### 구현된 기능
 
-- ✅ PDS Adapter (DID resolve, createRecord, listRecords)
-- ✅ Client Crypto Layer (단순 shared key 암복호화)
-- ✅ 단순 DM (A→B 저장, B→fetch→decrypt)
-- ✅ AppView 최소 버전 (record 감지, msgRef 인덱스만 저장)
-- ✅ Gateway 최소 버전 (WebSocket, "새 메시지 있음" push)
+- PDS Adapter (DID resolve, createRecord, listRecords)
+- Client Crypto Layer (단순 shared key 암복호화)
+- 단순 DM (A→B 저장, B→fetch→decrypt)
+- AppView 최소 버전 (record 감지, msgRef 인덱스만 저장)
+- Gateway 최소 버전 (WebSocket, "새 메시지 있음" push)
 
 ### 완료 기준
 
-✅ 브라우저 2개 열고 텍스트 채팅 가능
+브라우저 2개 열고 텍스트 채팅 가능
 
 ---
 
-## 📦 설치 및 실행
+## 설치 및 실행
 
 ### 사전 요구사항
 
@@ -101,7 +101,7 @@ docker-compose down
 
 ---
 
-## 🧪 테스트 방법
+## 테스트 방법
 
 ### 1. 두 개의 브라우저 창 열기
 
@@ -121,7 +121,7 @@ docker-compose down
 
 ---
 
-## 🏗 프로젝트 구조
+## 프로젝트 구조
 
 ```
 nodetalk/
@@ -142,7 +142,7 @@ nodetalk/
 
 ---
 
-## 🔐 보안 모델 (Phase 1)
+## 보안 모델 (Phase 1)
 
 ### 암호화
 
@@ -158,7 +158,7 @@ nodetalk/
 
 ---
 
-## 📝 다음 단계 (Phase 2+)
+## 다음 단계 (Phase 2+)
 
 - [ ] 그룹 채팅
 - [ ] MinIO 파일 전송
@@ -168,6 +168,6 @@ nodetalk/
 
 ---
 
-## 📄 라이선스
+## 라이선스
 
 MIT

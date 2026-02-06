@@ -35,7 +35,7 @@ export class AppViewIndexer {
     const agent = new BskyAgent({ service: pdsEndpoint });
     this.agents.set(did, agent);
     
-    console.log(`📡 Subscribing to PDS: ${did} at ${pdsEndpoint}`);
+    console.log(`Subscribing to PDS: ${did} at ${pdsEndpoint}`);
     
     // 주기적으로 레코드 체크 (Phase 1에서는 polling)
     this.startPolling(did, agent);
@@ -57,7 +57,7 @@ export class AppViewIndexer {
       for (const record of result.data.records) {
         await this.indexMessage(record, did);
       }
-      console.log(`✅ Indexed ${result.data.records.length} existing messages for ${did}`);
+      console.log(`Indexed ${result.data.records.length} existing messages for ${did}`);
     } catch (error: any) {
       // 인증 오류인 경우 무시 (public 레코드는 인증 없이 읽을 수 있어야 함)
       if (error.message?.includes("Authentication") || error.message?.includes("401")) {
@@ -133,7 +133,7 @@ export class AppViewIndexer {
       [roomId, recordUri, senderDid, createdAt]
     );
 
-    console.log(`✅ Indexed message: ${recordUri}`);
+    console.log(`Indexed message: ${recordUri}`);
     
     return {
       roomId,

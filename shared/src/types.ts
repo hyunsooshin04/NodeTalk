@@ -24,9 +24,13 @@ export interface RoomKey {
 }
 
 export interface PushNotification {
-  type: "new_message";
-  roomId: string;
-  recordUri: string;
+  type: "new_message" | "friend_request" | "friend_accepted" | "friend_removed";
+  roomId?: string;
+  recordUri?: string;
+  fromDid?: string;
+  toDid?: string;
+  requestId?: number;
+  friendDid?: string;
 }
 
 export interface PDSConfig {

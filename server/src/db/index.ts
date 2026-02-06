@@ -62,7 +62,7 @@ export async function setupSchema() {
     }
   }
   
-  console.log("✅ Database schema initialized");
+  console.log("Database schema initialized");
 }
 
 export function getDB() {

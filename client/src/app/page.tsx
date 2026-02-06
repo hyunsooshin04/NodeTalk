@@ -5,6 +5,8 @@ import { ClientPDSAdapter } from "@/lib/pds";
 import { GatewayClient } from "@/lib/gateway";
 import { RoomKeyManager } from "@/lib/room";
 import { encryptMessage, decryptMessage } from "@/lib/crypto";
+import type { Friend } from "@/lib/friends";
+import { generateDMRoomId } from "@/lib/rooms";
 import type { PushNotification } from "@nodetalk/shared";
 
 export default function Home() {
@@ -21,6 +23,14 @@ export default function Home() {
   const [profile, setProfile] = useState<any>(null);
   const [profileDisplayName, setProfileDisplayName] = useState("");
   const [profileDescription, setProfileDescription] = useState("");
+  const [showFriends, setShowFriends] = useState(false);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [addFriendInput, setAddFriendInput] = useState("");
+  const [currentView, setCurrentView] = useState<"chat" | "friends">("chat");
+  const [friendRequests, setFriendRequests] = useState<any[]>([]);
+  const [sentRequests, setSentRequests] = useState<any[]>([]);
+  const [showRequests, setShowRequests] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     roomKeyManager.loadAllKeys();
@@ -33,11 +43,16 @@ export default function Home() {
         setIdentifier(savedIdentifier);
         setPassword(savedPassword);
         // 자동 로그인
-        handleAutoLogin(savedIdentifier, savedPassword);
+        handleAutoLogin(savedIdentifier, savedPassword).finally(() => {
+          setIsLoading(false);
+        });
       } catch (error) {
         console.error("Failed to restore login:", error);
         localStorage.removeItem("nodetalk_login");
+        setIsLoading(false);
       }
+    } else {
+      setIsLoading(false);
     }
   }, [roomKeyManager]);
 
@@ -52,14 +67,37 @@ export default function Home() {
       const gw = new GatewayClient();
       gw.connect();
       gw.onMessage(async (notification: PushNotification) => {
-        console.log("📨 New message notification:", notification);
-        // 새 메시지 fetch 및 복호화
-        await loadMessages();
-      });
+        console.log("New notification:", notification);
+        if (notification.type === "new_message") {
+          // 새 메시지 fetch 및 복호화
+          await loadMessages();
+        } else if (notification.type === "friend_request") {
+          // 새 친구 신청 알림 - 자동으로 목록 새로고침 및 신청 목록 표시
+          await loadFriendRequests(adapter);
+          // 친구 목록 뷰로 전환하고 신청 목록 표시
+          setCurrentView("friends");
+          setShowRequests(true);
+            } else if (notification.type === "friend_accepted") {
+              // 친구 신청이 수락됨 - 친구 목록 새로고침
+              await loadFriends(adapter);
+              await loadFriendRequests(adapter);
+            } else if (notification.type === "friend_removed") {
+              // 친구가 삭제됨 - 친구 목록 새로고침
+              await loadFriends(adapter);
+            }
+          });
+      // 자신의 DID로 구독 (친구 신청 알림 받기)
+      gw.subscribeDid(adapter.getDid());
       setGateway(gw);
 
       // 프로필 정보 로드
       await loadProfile(adapter);
+      
+      // 친구 목록 로드 (서버에서 동기화)
+      await loadFriends(adapter);
+      
+      // 친구 신청 목록 로드
+      await loadFriendRequests(adapter);
     } catch (error) {
       console.error("Auto login error:", error);
       localStorage.removeItem("nodetalk_login");
@@ -101,7 +139,7 @@ export default function Home() {
             pdsEndpoint 
           }),
         });
-        console.log("✅ Auto-subscribed to AppView");
+        console.log("Auto-subscribed to AppView");
       } catch (error) {
         console.warn("Failed to auto-subscribe to AppView:", error);
       }
@@ -110,14 +148,37 @@ export default function Home() {
       const gw = new GatewayClient();
       gw.connect();
       gw.onMessage(async (notification: PushNotification) => {
-        console.log("📨 New message notification:", notification);
-        // 새 메시지 fetch 및 복호화
-        await loadMessages();
-      });
+        console.log("New notification:", notification);
+        if (notification.type === "new_message") {
+          // 새 메시지 fetch 및 복호화
+          await loadMessages();
+        } else if (notification.type === "friend_request") {
+          // 새 친구 신청 알림 - 자동으로 목록 새로고침 및 신청 목록 표시
+          await loadFriendRequests(adapter);
+          // 친구 목록 뷰로 전환하고 신청 목록 표시
+          setCurrentView("friends");
+          setShowRequests(true);
+            } else if (notification.type === "friend_accepted") {
+              // 친구 신청이 수락됨 - 친구 목록 새로고침
+              await loadFriends(adapter);
+              await loadFriendRequests(adapter);
+            } else if (notification.type === "friend_removed") {
+              // 친구가 삭제됨 - 친구 목록 새로고침
+              await loadFriends(adapter);
+            }
+          });
+      // 자신의 DID로 구독 (친구 신청 알림 받기)
+      gw.subscribeDid(adapter.getDid());
       setGateway(gw);
 
       // 프로필 정보 로드
       await loadProfile(adapter);
+      
+      // 친구 목록 로드 (서버에서 동기화)
+      await loadFriends(adapter);
+      
+      // 친구 신청 목록 로드
+      await loadFriendRequests(adapter);
     } catch (error) {
       console.error("Login error:", error);
       alert("Login failed: " + (error as Error).message);
@@ -153,7 +214,7 @@ export default function Home() {
 
       // PDS에 저장
       const recordUri = await pds.sendMessage(roomId, ciphertext, nonce);
-      console.log("✅ Message sent:", recordUri);
+      console.log("Message sent:", recordUri);
 
       // Room에 참여 등록 (아직 참여하지 않은 경우)
       try {
@@ -270,7 +331,7 @@ export default function Home() {
             pdsEndpoint 
           }),
         });
-        console.log("✅ Joined room and subscribed to AppView");
+        console.log("Joined room and subscribed to AppView");
       } catch (error) {
         console.warn("Failed to join room or subscribe to AppView:", error);
       }
@@ -286,9 +347,397 @@ export default function Home() {
     setIdentifier("");
     setPassword("");
     setMessages([]);
+    setRoomId("");
     gateway?.disconnect();
     setGateway(null);
   };
+
+
+  const handleStartChat = async (friendDid: string) => {
+    if (!pds) return;
+
+    // Room ID 자동 생성
+    const myDid = pds.getDid();
+    const newRoomId = generateDMRoomId(myDid, friendDid);
+    
+    setRoomId(newRoomId);
+    setCurrentView("chat");
+
+    // Room에 참여 등록
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const pdsEndpoint = "https://bsky.social";
+      
+      // 자신과 친구 모두 Room에 참여 등록
+      await fetch(`${API_URL}/api/rooms/${encodeURIComponent(newRoomId)}/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          did: myDid, 
+          pdsEndpoint 
+        }),
+      });
+
+      // Gateway 구독
+      if (gateway) {
+        gateway.subscribe(newRoomId);
+      }
+
+      // 메시지 로드
+      await loadMessages();
+    } catch (error) {
+      console.error("Failed to join room:", error);
+    }
+  };
+
+  const handleRemoveFriend = async (did: string) => {
+    if (!confirm("친구를 삭제하시겠습니까?") || !pds) {
+      return;
+    }
+
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const myDid = pds.getDid();
+
+      // 서버에서 친구 관계 삭제 (양방향 모두 삭제)
+      await fetch(`${API_URL}/api/friends`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          did1: myDid,
+          did2: did,
+        }),
+      });
+
+      // 친구 목록 새로고침
+      await loadFriends(pds);
+    } catch (error) {
+      console.error("Failed to remove friend:", error);
+      alert("친구 삭제 실패: " + (error as Error).message);
+    }
+  };
+
+  const handleSendFriendRequest = async () => {
+    if (!addFriendInput.trim() || !pds) return;
+
+    try {
+      // DID 또는 handle로 친구 신청
+      let friendDid = addFriendInput.trim();
+      
+      // handle인 경우 DID로 변환 시도
+      if (!friendDid.startsWith("did:")) {
+        try {
+          const profile = await pds.getProfile(friendDid);
+          friendDid = profile.did;
+        } catch (error) {
+          console.warn("Could not resolve handle, using as DID:", error);
+          alert("유효한 DID 또는 Handle을 입력해주세요.");
+          return;
+        }
+      }
+
+      // 서버에서 친구 목록을 먼저 동기화
+      await loadFriends(pds);
+
+      // 이미 친구인지 확인 (서버에서 가져온 친구 목록 기준)
+      const isAlreadyFriend = friends.some(f => f.did === friendDid);
+      if (isAlreadyFriend) {
+        alert("이미 친구 목록에 있습니다.");
+        return;
+      }
+
+      // 친구 신청 보내기
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const response = await fetch(`${API_URL}/api/friends/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fromDid: pds.getDid(),
+          toDid: friendDid,
+        }),
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        // "Already friends" 에러인 경우 친구 목록 새로고침
+        if (result.error === "Already friends") {
+          await loadFriends(pds);
+          alert("이미 친구 목록에 있습니다.");
+          return;
+        }
+        throw new Error(result.error || "Failed to send friend request");
+      }
+
+      setAddFriendInput("");
+      alert("친구 신청을 보냈습니다.");
+      await loadFriendRequests(pds);
+    } catch (error) {
+      console.error("Send friend request error:", error);
+      const errorMessage = (error as Error).message;
+      if (errorMessage === "Already friends") {
+        await loadFriends(pds);
+        alert("이미 친구 목록에 있습니다.");
+      } else {
+        alert("친구 신청 실패: " + errorMessage);
+      }
+    }
+  };
+
+  const loadFriends = async (adapter: ClientPDSAdapter) => {
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const myDid = adapter.getDid();
+
+      // 서버에서 친구 목록 가져오기
+      const response = await fetch(`${API_URL}/api/friends?did=${encodeURIComponent(myDid)}`);
+      if (response.ok) {
+        const serverFriends = await response.json();
+        
+        // 서버 친구 목록을 프로필 정보와 함께 가져오기
+        // 중복 제거를 위해 Set 사용 (같은 DID는 한 번만)
+        const seenDids = new Set<string>();
+        const friendsWithProfile = await Promise.all(
+          serverFriends
+            .map((serverFriend: any) => {
+              const friendDid = serverFriend.did1 === myDid ? serverFriend.did2 : serverFriend.did1;
+              return { friendDid, serverFriend };
+            })
+            .filter(({ friendDid }) => {
+              // 중복 제거
+              if (seenDids.has(friendDid)) {
+                return false;
+              }
+              seenDids.add(friendDid);
+              return true;
+            })
+            .map(async ({ friendDid, serverFriend }) => {
+              try {
+                const profile = await adapter.getProfile(friendDid);
+                return {
+                  did: profile.did,
+                  handle: profile.handle,
+                  displayName: profile.displayName,
+                  avatar: profile.avatar,
+                  addedAt: serverFriend.created_at || new Date().toISOString(),
+                } as Friend;
+              } catch (error) {
+                // 프로필을 가져올 수 없어도 친구로 추가
+                return {
+                  did: friendDid,
+                  addedAt: serverFriend.created_at || new Date().toISOString(),
+                } as Friend;
+              }
+            })
+        );
+        
+        // 친구 목록 업데이트 (서버에서 가져온 데이터만 사용)
+        setFriends(friendsWithProfile);
+      }
+    } catch (error) {
+      console.error("Failed to load friends:", error);
+    }
+  };
+
+  const loadFriendRequests = async (adapter?: ClientPDSAdapter) => {
+    const currentPds = adapter || pds;
+    if (!currentPds) return;
+
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const myDid = currentPds.getDid();
+
+      // 받은 신청과 보낸 신청을 병렬로 가져오기
+      const [receivedResponse, sentResponse] = await Promise.all([
+        fetch(`${API_URL}/api/friends/requests/received?did=${encodeURIComponent(myDid)}`),
+        fetch(`${API_URL}/api/friends/requests/sent?did=${encodeURIComponent(myDid)}`),
+      ]);
+
+      // 받은 신청 처리 (프로필 정보는 나중에 필요할 때만 가져오기)
+      if (receivedResponse.ok) {
+        const received = await receivedResponse.json();
+        // 프로필 정보는 나중에 lazy loading (성능 개선)
+        setFriendRequests(received);
+      }
+
+      // 보낸 신청 처리 (프로필 정보는 나중에 필요할 때만 가져오기)
+      if (sentResponse.ok) {
+        const sent = await sentResponse.json();
+        // 프로필 정보는 나중에 lazy loading (성능 개선)
+        setSentRequests(sent);
+      }
+    } catch (error) {
+      console.error("Failed to load friend requests:", error);
+    }
+  };
+
+  // 프로필 정보를 배치로 가져오기 (성능 개선)
+  useEffect(() => {
+    if (showRequests && friendRequests.length > 0 && pds) {
+      // 프로필 정보가 없는 항목들만 가져오기
+      const requestsWithoutProfile = friendRequests.filter(
+        (req) => !req.from_handle && !req.from_displayName
+      );
+      
+      if (requestsWithoutProfile.length > 0) {
+        // 병렬로 프로필 정보 가져오기
+        Promise.all(
+          requestsWithoutProfile.map(async (req) => {
+            try {
+              const profile = await pds.getProfile(req.from_did);
+              return {
+                id: req.id,
+                from_handle: profile.handle,
+                from_displayName: profile.displayName,
+              };
+            } catch (error) {
+              return { id: req.id, from_handle: null, from_displayName: null };
+            }
+          })
+        ).then((profiles) => {
+          // 상태 업데이트
+          setFriendRequests((prev) =>
+            prev.map((req) => {
+              const profile = profiles.find((p) => p.id === req.id);
+              if (profile) {
+                return {
+                  ...req,
+                  from_handle: profile.from_handle || req.from_handle,
+                  from_displayName: profile.from_displayName || req.from_displayName,
+                };
+              }
+              return req;
+            })
+          );
+        });
+      }
+    }
+  }, [showRequests, friendRequests.length, pds]);
+
+  useEffect(() => {
+    if (showRequests && sentRequests.length > 0 && pds) {
+      // 프로필 정보가 없는 항목들만 가져오기
+      const requestsWithoutProfile = sentRequests.filter(
+        (req) => !req.to_handle && !req.to_displayName
+      );
+      
+      if (requestsWithoutProfile.length > 0) {
+        // 병렬로 프로필 정보 가져오기
+        Promise.all(
+          requestsWithoutProfile.map(async (req) => {
+            try {
+              const profile = await pds.getProfile(req.to_did);
+              return {
+                id: req.id,
+                to_handle: profile.handle,
+                to_displayName: profile.displayName,
+              };
+            } catch (error) {
+              return { id: req.id, to_handle: null, to_displayName: null };
+            }
+          })
+        ).then((profiles) => {
+          // 상태 업데이트
+          setSentRequests((prev) =>
+            prev.map((req) => {
+              const profile = profiles.find((p) => p.id === req.id);
+              if (profile) {
+                return {
+                  ...req,
+                  to_handle: profile.to_handle || req.to_handle,
+                  to_displayName: profile.to_displayName || req.to_displayName,
+                };
+              }
+              return req;
+            })
+          );
+        });
+      }
+    }
+  }, [showRequests, sentRequests.length, pds]);
+
+  const handleAcceptFriendRequest = async (requestId: number, fromDid: string) => {
+    if (!pds) return;
+
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const response = await fetch(`${API_URL}/api/friends/request/${requestId}/respond`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "accept" }),
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || "Failed to accept friend request");
+      }
+
+      alert("친구 신청을 수락했습니다.");
+      // 친구 목록 새로고침 (서버에서 가져오기)
+      await loadFriends(pds);
+      await loadFriendRequests(pds);
+    } catch (error) {
+      console.error("Accept friend request error:", error);
+      alert("친구 신청 수락 실패: " + (error as Error).message);
+    }
+  };
+
+  const handleRejectFriendRequest = async (requestId: number) => {
+    if (!pds) return;
+
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const response = await fetch(`${API_URL}/api/friends/request/${requestId}/respond`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reject" }),
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || "Failed to reject friend request");
+      }
+
+      alert("친구 신청을 거절했습니다.");
+      await loadFriendRequests(pds);
+    } catch (error) {
+      console.error("Reject friend request error:", error);
+      alert("친구 신청 거절 실패: " + (error as Error).message);
+    }
+  };
+
+  const handleCancelFriendRequest = async (requestId: number) => {
+    if (!confirm("친구 신청을 취소하시겠습니까?") || !pds) {
+      return;
+    }
+
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const response = await fetch(`${API_URL}/api/friends/request/${requestId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || "Failed to cancel friend request");
+      }
+
+      alert("친구 신청을 취소했습니다.");
+      await loadFriendRequests(pds);
+    } catch (error) {
+      console.error("Cancel friend request error:", error);
+      alert("친구 신청 취소 실패: " + (error as Error).message);
+    }
+  };
+
+  // 로딩 중일 때는 아무것도 표시하지 않음 (로그인 페이지 깜빡임 방지)
+  if (isLoading) {
+    return (
+      <div style={{ padding: "2rem", maxWidth: "400px", margin: "0 auto", textAlign: "center" }}>
+        <p>로딩 중...</p>
+      </div>
+    );
+  }
 
   if (!loggedIn) {
     return (
@@ -329,215 +778,530 @@ export default function Home() {
   }
 
   return (
-    <div style={{ padding: "2rem", maxWidth: "800px", margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-        <div>
-          <h1>NodeTalk - Phase 1 Demo</h1>
-          <p>
-            Logged in as: {profile?.displayName || profile?.handle || pds?.getDid()}
+    <div style={{ padding: "2rem", maxWidth: "1200px", margin: "0 auto", display: "flex", gap: "2rem" }}>
+      {/* 사이드바 */}
+      <div style={{ width: "250px", borderRight: "1px solid #ccc", paddingRight: "1rem" }}>
+        <div style={{ marginBottom: "1rem" }}>
+          <h2 style={{ marginTop: 0 }}>NodeTalk</h2>
+          <p style={{ fontSize: "0.9rem", color: "#666", margin: 0 }}>
+            {profile?.displayName || profile?.handle || pds?.getDid()}
             {profile?.handle && ` (@${profile.handle})`}
           </p>
         </div>
-        <div style={{ display: "flex", gap: "0.5rem" }}>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "1rem" }}>
+          <button
+            onClick={() => setCurrentView("friends")}
+            style={{
+              padding: "0.75rem",
+              backgroundColor: currentView === "friends" ? "#0070f3" : "#f5f5f5",
+              color: currentView === "friends" ? "white" : "#333",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              textAlign: "left",
+              position: "relative",
+            }}
+          >
+            친구 목록
+            {friendRequests.length > 0 && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: "0.25rem",
+                  right: "0.5rem",
+                  backgroundColor: "#dc3545",
+                  color: "white",
+                  borderRadius: "50%",
+                  width: "20px",
+                  height: "20px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "0.75rem",
+                  fontWeight: "bold",
+                }}
+              >
+                {friendRequests.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setCurrentView("chat")}
+            style={{
+              padding: "0.75rem",
+              backgroundColor: currentView === "chat" ? "#0070f3" : "#f5f5f5",
+              color: currentView === "chat" ? "white" : "#333",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              textAlign: "left",
+            }}
+          >
+            채팅
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           <button
             onClick={() => setShowProfile(!showProfile)}
             style={{
-              padding: "0.5rem 1rem",
+              padding: "0.5rem",
               backgroundColor: "#6c757d",
               color: "white",
               border: "none",
               borderRadius: "4px",
               cursor: "pointer",
+              fontSize: "0.9rem",
             }}
           >
-            {showProfile ? "Close Profile" : "Edit Profile"}
+            {showProfile ? "프로필 닫기" : "프로필 편집"}
           </button>
           <button
             onClick={handleLogout}
             style={{
-              padding: "0.5rem 1rem",
+              padding: "0.5rem",
               backgroundColor: "#dc3545",
               color: "white",
               border: "none",
               borderRadius: "4px",
               cursor: "pointer",
+              fontSize: "0.9rem",
             }}
           >
-            Logout
+            로그아웃
           </button>
         </div>
       </div>
 
-      {showProfile && (
-        <div
-          style={{
-            border: "1px solid #ccc",
-            borderRadius: "4px",
-            padding: "1.5rem",
-            marginBottom: "2rem",
-            backgroundColor: "#f9f9f9",
-          }}
-        >
-          <h2 style={{ marginTop: 0 }}>Edit Profile</h2>
-          <div style={{ marginBottom: "1rem" }}>
-            <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "bold" }}>
-              Display Name
-            </label>
-            <input
-              type="text"
-              value={profileDisplayName}
-              onChange={(e) => setProfileDisplayName(e.target.value)}
-              placeholder="Display Name"
-              style={{
-                width: "100%",
-                padding: "0.5rem",
-                border: "1px solid #ccc",
-                borderRadius: "4px",
-              }}
-            />
-          </div>
-          <div style={{ marginBottom: "1rem" }}>
-            <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "bold" }}>
-              Description
-            </label>
-            <textarea
-              value={profileDescription}
-              onChange={(e) => setProfileDescription(e.target.value)}
-              placeholder="Description"
-              rows={3}
-              style={{
-                width: "100%",
-                padding: "0.5rem",
-                border: "1px solid #ccc",
-                borderRadius: "4px",
-                resize: "vertical",
-              }}
-            />
-          </div>
-          <div style={{ marginBottom: "1rem" }}>
-            <p style={{ margin: 0, fontSize: "0.9rem", color: "#666" }}>
-              DID: {pds?.getDid()}
-            </p>
-            {profile?.handle && (
-              <p style={{ margin: "0.25rem 0 0 0", fontSize: "0.9rem", color: "#666" }}>
-                Handle: @{profile.handle}
-              </p>
-            )}
-          </div>
-          <button
-            onClick={handleUpdateProfile}
+      {/* 메인 컨텐츠 */}
+      <div style={{ flex: 1 }}>
+
+        {showProfile && (
+          <div
             style={{
-              padding: "0.5rem 1rem",
-              backgroundColor: "#28a745",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-            }}
-          >
-            Save Profile
-          </button>
-        </div>
-      )}
-
-      <div style={{ marginTop: "2rem" }}>
-        <input
-          type="text"
-          placeholder="Room ID (e.g., dm-user1-user2)"
-          value={roomId}
-          onChange={(e) => setRoomId(e.target.value)}
-          style={{ width: "100%", padding: "0.5rem", marginBottom: "1rem" }}
-        />
-        <button
-          onClick={handleSubscribe}
-          style={{
-            padding: "0.5rem 1rem",
-            backgroundColor: "#0070f3",
-            color: "white",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer",
-            marginBottom: "1rem",
-          }}
-        >
-          Subscribe to Room
-        </button>
-      </div>
-
-      <div style={{ marginTop: "2rem" }}>
-        <div
-          style={{
-            border: "1px solid #ccc",
-            borderRadius: "4px",
-            padding: "1rem",
-            minHeight: "300px",
-            maxHeight: "400px",
-            overflowY: "auto",
-            marginBottom: "1rem",
-          }}
-        >
-          {messages.length === 0 ? (
-            <p style={{ color: "#666" }}>No messages yet</p>
-          ) : (
-            messages.map((msg, idx) => (
-              <div
-                key={idx}
-                style={{
-                  padding: "0.5rem",
-                  marginBottom: "0.5rem",
-                  backgroundColor: msg.senderDid === pds?.getDid() ? "#e3f2fd" : "#f5f5f5",
-                  borderRadius: "4px",
-                  borderLeft: msg.senderDid === pds?.getDid() ? "3px solid #2196f3" : "3px solid #ccc",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.25rem" }}>
-                  <div style={{ fontSize: "0.9rem", fontWeight: "bold", color: "#333" }}>
-                    {msg.profile?.displayName || msg.profile?.handle || msg.senderDid || "Unknown"}
-                    {msg.senderDid === pds?.getDid() && " (You)"}
-                  </div>
-                  <div style={{ fontSize: "0.8rem", color: "#666" }}>
-                    {new Date(msg.createdAt).toLocaleString()}
-                  </div>
-                </div>
-                <div style={{ 
-                  color: msg.decrypted ? "#000" : "#f44336",
-                  fontStyle: msg.decrypted ? "normal" : "italic"
-                }}>
-                  {msg.plaintext}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div style={{ display: "flex", gap: "0.5rem" }}>
-          <input
-            type="text"
-            placeholder="Type a message..."
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
-            style={{
-              flex: 1,
-              padding: "0.5rem",
               border: "1px solid #ccc",
               borderRadius: "4px",
-            }}
-          />
-          <button
-            onClick={handleSendMessage}
-            style={{
-              padding: "0.5rem 1rem",
-              backgroundColor: "#0070f3",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
+              padding: "1.5rem",
+              marginBottom: "2rem",
+              backgroundColor: "#f9f9f9",
             }}
           >
-            Send
-          </button>
-        </div>
+            <h2 style={{ marginTop: 0 }}>프로필 편집</h2>
+            <div style={{ marginBottom: "1rem" }}>
+              <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "bold" }}>
+                표시 이름
+              </label>
+              <input
+                type="text"
+                value={profileDisplayName}
+                onChange={(e) => setProfileDisplayName(e.target.value)}
+                placeholder="Display Name"
+                style={{
+                  width: "100%",
+                  padding: "0.5rem",
+                  border: "1px solid #ccc",
+                  borderRadius: "4px",
+                }}
+              />
+            </div>
+            <div style={{ marginBottom: "1rem" }}>
+              <label style={{ display: "block", marginBottom: "0.5rem", fontWeight: "bold" }}>
+                설명
+              </label>
+              <textarea
+                value={profileDescription}
+                onChange={(e) => setProfileDescription(e.target.value)}
+                placeholder="Description"
+                rows={3}
+                style={{
+                  width: "100%",
+                  padding: "0.5rem",
+                  border: "1px solid #ccc",
+                  borderRadius: "4px",
+                  resize: "vertical",
+                }}
+              />
+            </div>
+            <div style={{ marginBottom: "1rem" }}>
+              <p style={{ margin: 0, fontSize: "0.9rem", color: "#666" }}>
+                DID: {pds?.getDid()}
+              </p>
+              {profile?.handle && (
+                <p style={{ margin: "0.25rem 0 0 0", fontSize: "0.9rem", color: "#666" }}>
+                  Handle: @{profile.handle}
+                </p>
+              )}
+            </div>
+            <button
+              onClick={handleUpdateProfile}
+              style={{
+                padding: "0.5rem 1rem",
+                backgroundColor: "#28a745",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+              }}
+            >
+              저장
+            </button>
+          </div>
+        )}
+
+        {currentView === "friends" && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+              <h2 style={{ marginTop: 0 }}>친구 목록</h2>
+              <button
+                onClick={() => {
+                  setShowRequests(!showRequests);
+                  if (!showRequests && pds) {
+                    loadFriendRequests(pds);
+                  }
+                }}
+                style={{
+                  padding: "0.5rem 1rem",
+                  backgroundColor: showRequests ? "#0070f3" : "#6c757d",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                }}
+              >
+                {showRequests ? "친구 목록 보기" : "신청 목록 보기"}
+              </button>
+            </div>
+
+            {showRequests ? (
+              <div>
+                {/* 받은 친구 신청 */}
+                <div style={{ marginBottom: "2rem" }}>
+                  <h3>받은 친구 신청 ({friendRequests.length})</h3>
+                  {friendRequests.length === 0 ? (
+                    <p style={{ color: "#666" }}>받은 친구 신청이 없습니다.</p>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                      {friendRequests.map((request) => (
+                        <div
+                          key={request.id}
+                          style={{
+                            padding: "1rem",
+                            border: "1px solid #ccc",
+                            borderRadius: "4px",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: "bold" }}>
+                              {request.from_displayName || request.from_handle || request.from_did}
+                            </div>
+                            {request.from_handle && (
+                              <div style={{ fontSize: "0.9rem", color: "#666" }}>
+                                @{request.from_handle}
+                              </div>
+                            )}
+                            <div style={{ fontSize: "0.8rem", color: "#999" }}>
+                              {request.from_did}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: "0.5rem" }}>
+                            <button
+                              onClick={() => handleAcceptFriendRequest(request.id, request.from_did)}
+                              style={{
+                                padding: "0.5rem 1rem",
+                                backgroundColor: "#28a745",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                              }}
+                            >
+                              수락
+                            </button>
+                            <button
+                              onClick={() => handleRejectFriendRequest(request.id)}
+                              style={{
+                                padding: "0.5rem 1rem",
+                                backgroundColor: "#dc3545",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                              }}
+                            >
+                              거절
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 보낸 친구 신청 */}
+                <div>
+                  <h3>보낸 친구 신청 ({sentRequests.length})</h3>
+                  {sentRequests.length === 0 ? (
+                    <p style={{ color: "#666" }}>보낸 친구 신청이 없습니다.</p>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                      {sentRequests.map((request) => (
+                        <div
+                          key={request.id}
+                          style={{
+                            padding: "1rem",
+                            border: "1px solid #ccc",
+                            borderRadius: "4px",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: "bold" }}>
+                              {request.to_displayName || request.to_handle || request.to_did}
+                            </div>
+                            {request.to_handle && (
+                              <div style={{ fontSize: "0.9rem", color: "#666" }}>
+                                @{request.to_handle}
+                              </div>
+                            )}
+                            <div style={{ fontSize: "0.8rem", color: "#999" }}>
+                              {request.to_did}
+                            </div>
+                            <div style={{ fontSize: "0.8rem", color: "#999", marginTop: "0.25rem" }}>
+                              대기 중...
+                            </div>
+                          </div>
+                          <div>
+                            <button
+                              onClick={() => handleCancelFriendRequest(request.id)}
+                              style={{
+                                padding: "0.5rem 1rem",
+                                backgroundColor: "#dc3545",
+                                color: "white",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                fontSize: "0.9rem",
+                              }}
+                            >
+                              취소
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* 친구 신청 보내기 */}
+                <div style={{ marginBottom: "2rem", padding: "1rem", border: "1px solid #ccc", borderRadius: "4px" }}>
+                  <h3 style={{ marginTop: 0 }}>친구 신청 보내기</h3>
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <input
+                      type="text"
+                      value={addFriendInput}
+                      onChange={(e) => setAddFriendInput(e.target.value)}
+                      placeholder="DID 또는 Handle 입력"
+                      onKeyPress={(e) => e.key === "Enter" && handleSendFriendRequest()}
+                      style={{
+                        flex: 1,
+                        padding: "0.5rem",
+                        border: "1px solid #ccc",
+                        borderRadius: "4px",
+                      }}
+                    />
+                    <button
+                      onClick={handleSendFriendRequest}
+                      style={{
+                        padding: "0.5rem 1rem",
+                        backgroundColor: "#28a745",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      신청
+                    </button>
+                  </div>
+                </div>
+
+            {/* 친구 목록 */}
+            <div>
+              <h3>친구 ({friends.length})</h3>
+              {friends.length === 0 ? (
+                <p style={{ color: "#666" }}>친구가 없습니다. 위에서 친구를 추가하세요.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {friends.map((friend) => (
+                    <div
+                      key={friend.did}
+                      style={{
+                        padding: "1rem",
+                        border: "1px solid #ccc",
+                        borderRadius: "4px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: "bold" }}>
+                          {friend.displayName || friend.handle || friend.did}
+                        </div>
+                        {friend.handle && (
+                          <div style={{ fontSize: "0.9rem", color: "#666" }}>
+                            @{friend.handle}
+                          </div>
+                        )}
+                        <div style={{ fontSize: "0.8rem", color: "#999" }}>
+                          {friend.did}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: "0.5rem" }}>
+                        <button
+                          onClick={() => handleStartChat(friend.did)}
+                          style={{
+                            padding: "0.5rem 1rem",
+                            backgroundColor: "#0070f3",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                            fontSize: "0.9rem",
+                          }}
+                        >
+                          채팅
+                        </button>
+                        <button
+                          onClick={() => handleRemoveFriend(friend.did)}
+                          style={{
+                            padding: "0.5rem 1rem",
+                            backgroundColor: "#dc3545",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                            fontSize: "0.9rem",
+                          }}
+                        >
+                          삭제
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {currentView === "chat" && (
+          <div>
+            <h2 style={{ marginTop: 0 }}>채팅</h2>
+            
+            {roomId && (
+              <div style={{ marginBottom: "1rem", padding: "0.5rem", backgroundColor: "#e3f2fd", borderRadius: "4px" }}>
+                <div style={{ fontSize: "0.9rem", color: "#666" }}>
+                  현재 채팅방: {roomId}
+                </div>
+              </div>
+            )}
+
+            {!roomId && (
+              <div style={{ padding: "2rem", textAlign: "center", color: "#666" }}>
+                <p>친구 목록에서 친구를 선택하여 채팅을 시작하세요.</p>
+              </div>
+            )}
+
+            {roomId && (
+              <>
+                <div
+                  style={{
+                    border: "1px solid #ccc",
+                    borderRadius: "4px",
+                    padding: "1rem",
+                    minHeight: "400px",
+                    maxHeight: "500px",
+                    overflowY: "auto",
+                    marginBottom: "1rem",
+                  }}
+                >
+                  {messages.length === 0 ? (
+                    <p style={{ color: "#666" }}>메시지가 없습니다.</p>
+                  ) : (
+                    messages.map((msg, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          padding: "0.5rem",
+                          marginBottom: "0.5rem",
+                          backgroundColor: msg.senderDid === pds?.getDid() ? "#e3f2fd" : "#f5f5f5",
+                          borderRadius: "4px",
+                          borderLeft: msg.senderDid === pds?.getDid() ? "3px solid #2196f3" : "3px solid #ccc",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.25rem" }}>
+                          <div style={{ fontSize: "0.9rem", fontWeight: "bold", color: "#333" }}>
+                            {msg.profile?.displayName || msg.profile?.handle || msg.senderDid || "Unknown"}
+                            {msg.senderDid === pds?.getDid() && " (나)"}
+                          </div>
+                          <div style={{ fontSize: "0.8rem", color: "#666" }}>
+                            {new Date(msg.createdAt).toLocaleString()}
+                          </div>
+                        </div>
+                        <div style={{ 
+                          color: msg.decrypted ? "#000" : "#f44336",
+                          fontStyle: msg.decrypted ? "normal" : "italic"
+                        }}>
+                          {msg.plaintext}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <input
+                    type="text"
+                    placeholder="메시지를 입력하세요..."
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
+                    style={{
+                      flex: 1,
+                      padding: "0.5rem",
+                      border: "1px solid #ccc",
+                      borderRadius: "4px",
+                    }}
+                  />
+                  <button
+                    onClick={handleSendMessage}
+                    style={{
+                      padding: "0.5rem 1rem",
+                      backgroundColor: "#0070f3",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    전송
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

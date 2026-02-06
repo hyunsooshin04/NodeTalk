@@ -32,3 +32,30 @@ CREATE INDEX IF NOT EXISTS idx_room_members_did ON room_members(member_did);
 CREATE INDEX IF NOT EXISTS idx_room_id ON msg_index(room_id);
 CREATE INDEX IF NOT EXISTS idx_created_at ON msg_index(created_at);
 CREATE INDEX IF NOT EXISTS idx_sender_did ON msg_index(sender_did);
+
+-- 친구 신청 (Phase 1)
+CREATE TABLE IF NOT EXISTS friend_requests (
+  id SERIAL PRIMARY KEY,
+  from_did TEXT NOT NULL,
+  to_did TEXT NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending, accepted, rejected
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  UNIQUE(from_did, to_did)
+);
+
+CREATE INDEX IF NOT EXISTS idx_friend_requests_from_did ON friend_requests(from_did);
+CREATE INDEX IF NOT EXISTS idx_friend_requests_to_did ON friend_requests(to_did);
+CREATE INDEX IF NOT EXISTS idx_friend_requests_status ON friend_requests(status);
+
+-- 친구 관계 (Phase 1)
+CREATE TABLE IF NOT EXISTS friends (
+  id SERIAL PRIMARY KEY,
+  did1 TEXT NOT NULL,
+  did2 TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  UNIQUE(did1, did2)
+);
+
+CREATE INDEX IF NOT EXISTS idx_friends_did1 ON friends(did1);
+CREATE INDEX IF NOT EXISTS idx_friends_did2 ON friends(did2);
