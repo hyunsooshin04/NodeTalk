@@ -66,9 +66,12 @@ export async function decryptMessage(
   }
 
   try {
+    // Base64 디코딩
     const ciphertextBuffer = base64ToArrayBuffer(ciphertext);
-    const nonceBuffer = base64ToArrayBuffer(nonce);
+    const nonceArrayBuffer = base64ToArrayBuffer(nonce);
+    const nonceBuffer = new Uint8Array(nonceArrayBuffer);
 
+    // nonce 길이 검증 (12 bytes for AES-GCM)
     if (nonceBuffer.length !== 12) {
       throw new Error(`Invalid nonce length: expected 12, got ${nonceBuffer.length}`);
     }

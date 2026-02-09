@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ClientPDSAdapter } from "@/lib/pds";
 import { GatewayClient } from "@/lib/gateway";
 import { RoomKeyManager } from "@/lib/room";
@@ -31,6 +31,12 @@ export default function Home() {
   const [sentRequests, setSentRequests] = useState<any[]>([]);
   const [showRequests, setShowRequests] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [unreadCounts, setUnreadCounts] = useState<Map<string, number>>(new Map()); // roomId -> unread count
+  const [lastReadMessageUri, setLastReadMessageUri] = useState<Map<string, string>>(new Map()); // roomId -> last read message URI
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const roomIdRef = useRef<string>("");
 
   useEffect(() => {
     roomKeyManager.loadAllKeys();
@@ -56,6 +62,72 @@ export default function Home() {
     }
   }, [roomKeyManager]);
 
+  // roomId가 변경되면 메시지 자동 로드 및 읽음 처리
+  useEffect(() => {
+    roomIdRef.current = roomId; // ref 업데이트
+    if (roomId && pds) {
+      console.log(`Room ID changed to ${roomId}, loading messages...`);
+      setMessages([]); // 먼저 초기화
+      loadMessages().then(() => {
+        // 메시지 로드 후 스크롤을 맨 아래로
+        setTimeout(() => {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        }, 200);
+        
+        // 채팅방을 열었으므로 마지막 읽은 메시지 ID 업데이트
+        updateLastReadMessage(roomId);
+      });
+    }
+  }, [roomId, pds]);
+  
+  // 마지막 읽은 메시지 ID 업데이트 함수
+  const updateLastReadMessage = async (targetRoomId: string) => {
+    if (!pds || !targetRoomId) return;
+    
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const myDid = pds.getDid();
+      
+      console.log(`[Client] Updating last read message for room ${targetRoomId}`);
+      
+      // messages 배열에서 가장 최신 메시지의 ID를 찾기
+      // 하지만 messages는 msg_index의 id를 가지고 있지 않을 수 있으므로
+      // 서버에서 방의 마지막 메시지 ID로 업데이트하도록 함
+      const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(targetRoomId)}/read`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          did: myDid,
+          // messageId는 서버에서 방의 마지막 메시지 ID로 자동 설정됨
+        }),
+      });
+      
+      const result = await response.json();
+      console.log(`[Client] Updated last read message for room ${targetRoomId}, lastReadMessageId: ${result.lastReadMessageId}`);
+      
+      // 안 읽은 메시지 개수 초기화
+      setUnreadCounts((prev) => {
+        const updated = new Map(prev);
+        updated.set(targetRoomId, 0);
+        return updated;
+      });
+      
+      // 채팅방 목록 새로고침 (서버에서 계산된 안 읽은 메시지 개수 가져오기)
+      await loadRooms(pds);
+    } catch (error) {
+      console.error("[Client] Failed to update last read message:", error);
+    }
+  };
+
+  // messages가 변경되면 스크롤을 맨 아래로
+  useEffect(() => {
+    if (messages.length > 0) {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
+    }
+  }, [messages.length]);
+
   const handleAutoLogin = async (savedIdentifier: string, savedPassword: string) => {
     try {
       const adapter = new ClientPDSAdapter();
@@ -67,25 +139,92 @@ export default function Home() {
       const gw = new GatewayClient();
       gw.connect();
       gw.onMessage(async (notification: PushNotification) => {
-        console.log("New notification:", notification);
+        console.log("New notification received:", notification);
         if (notification.type === "new_message") {
-          // 새 메시지 fetch 및 복호화
-          await loadMessages();
+          // 현재 선택된 방의 메시지인지 확인 (ref를 통해 최신 값 참조)
+          const currentRoomId = roomIdRef.current;
+          console.log(`Checking notification: roomId=${notification.roomId}, current roomId=${currentRoomId || 'none'}`);
+          if (notification.roomId === currentRoomId && notification.recordUri) {
+            console.log(`New message in current room ${currentRoomId}, adding message...`);
+            // roomId가 여전히 같은지 확인
+            if (roomIdRef.current === notification.roomId && notification.recordUri) {
+              try {
+                let msg;
+                
+                // 메시지 내용이 알림에 포함되어 있으면 바로 사용 (더 빠름)
+                if (notification.messageContent) {
+                  msg = {
+                    uri: notification.recordUri,
+                    senderDid: notification.messageContent.senderDid,
+                    createdAt: notification.messageContent.createdAt,
+                    roomId: notification.roomId,
+                    ciphertext: notification.messageContent.ciphertext,
+                    nonce: notification.messageContent.nonce,
+                  };
+                  console.log("Using message content from notification (fast path)");
+                } else {
+                  // 폴백: PDS에서 조회 (이전 방식)
+                  console.log("Fetching message from PDS (fallback)");
+                  const msgRecord = await adapter.getMessage(notification.recordUri);
+                  if (msgRecord) {
+                    // URI 파싱하여 senderDid 추출
+                    const uriMatch = notification.recordUri.match(/at:\/\/([^/]+)\//);
+                    const senderDid = uriMatch ? uriMatch[1] : "";
+                    
+                    msg = {
+                      uri: notification.recordUri,
+                      senderDid: senderDid,
+                      createdAt: msgRecord.createdAt || new Date().toISOString(),
+                      roomId: msgRecord.roomId,
+                      ciphertext: String(msgRecord.ciphertext || ""),
+                      nonce: String(msgRecord.nonce || ""),
+                    };
+                  }
+                }
+                
+                if (msg) {
+                  console.log("[Client AutoLogin] Calling addMessageToState with message...");
+                  // 메시지를 상태에 추가 (adapter를 파라미터로 전달)
+                  await addMessageToState(msg, notification.roomId, adapter);
+                  console.log("[Client AutoLogin] addMessageToState completed");
+                } else {
+                  console.warn("[Client AutoLogin] ✗ No message object created");
+                }
+              } catch (error) {
+                console.error("[Client AutoLogin] ✗ Failed to process new message:", error);
+                // 실패 시 전체 재로드로 폴백
+                if (roomIdRef.current === notification.roomId) {
+                  console.log("[Client AutoLogin] Falling back to loadMessages()");
+                  await loadMessages();
+                }
+              }
+              await loadRooms(adapter);
+            } else {
+              console.log(`[Client AutoLogin] ✗ RoomId changed during processing. Was: ${notification.roomId}, Now: ${roomIdRef.current}`);
+            }
+          } else {
+            console.log(`[Client AutoLogin] ✗ RoomId mismatch or missing recordUri`);
+            console.log(`[Client AutoLogin]   - notification.roomId: ${notification.roomId}`);
+            console.log(`[Client AutoLogin]   - currentRoomId: ${currentRoomId || 'none'}`);
+            console.log(`[Client AutoLogin]   - notification.recordUri: ${notification.recordUri || 'missing'}`);
+            // 다른 방의 메시지이지만 채팅방 목록은 새로고침
+            await loadRooms(adapter);
+          }
         } else if (notification.type === "friend_request") {
           // 새 친구 신청 알림 - 자동으로 목록 새로고침 및 신청 목록 표시
           await loadFriendRequests(adapter);
           // 친구 목록 뷰로 전환하고 신청 목록 표시
           setCurrentView("friends");
           setShowRequests(true);
-            } else if (notification.type === "friend_accepted") {
-              // 친구 신청이 수락됨 - 친구 목록 새로고침
-              await loadFriends(adapter);
-              await loadFriendRequests(adapter);
-            } else if (notification.type === "friend_removed") {
-              // 친구가 삭제됨 - 친구 목록 새로고침
-              await loadFriends(adapter);
-            }
-          });
+        } else if (notification.type === "friend_accepted") {
+          // 친구 신청이 수락됨 - 친구 목록 새로고침
+          await loadFriends(adapter);
+          await loadFriendRequests(adapter);
+        } else if (notification.type === "friend_removed") {
+          // 친구가 삭제됨 - 친구 목록 새로고침
+          await loadFriends(adapter);
+        }
+      });
       // 자신의 DID로 구독 (친구 신청 알림 받기)
       gw.subscribeDid(adapter.getDid());
       setGateway(gw);
@@ -98,6 +237,9 @@ export default function Home() {
       
       // 친구 신청 목록 로드
       await loadFriendRequests(adapter);
+      
+      // 채팅방 목록 로드
+      await loadRooms(adapter);
     } catch (error) {
       console.error("Auto login error:", error);
       localStorage.removeItem("nodetalk_login");
@@ -148,25 +290,92 @@ export default function Home() {
       const gw = new GatewayClient();
       gw.connect();
       gw.onMessage(async (notification: PushNotification) => {
-        console.log("New notification:", notification);
+        console.log("New notification received:", notification);
         if (notification.type === "new_message") {
-          // 새 메시지 fetch 및 복호화
-          await loadMessages();
+          // 현재 선택된 방의 메시지인지 확인 (ref를 통해 최신 값 참조)
+          const currentRoomId = roomIdRef.current;
+          console.log(`Checking notification: roomId=${notification.roomId}, current roomId=${currentRoomId || 'none'}`);
+          if (notification.roomId === currentRoomId && notification.recordUri) {
+            console.log(`New message in current room ${currentRoomId}, adding message...`);
+            // roomId가 여전히 같은지 확인
+            if (roomIdRef.current === notification.roomId && notification.recordUri) {
+              try {
+                let msg;
+                
+                // 메시지 내용이 알림에 포함되어 있으면 바로 사용 (더 빠름)
+                if (notification.messageContent) {
+                  msg = {
+                    uri: notification.recordUri,
+                    senderDid: notification.messageContent.senderDid,
+                    createdAt: notification.messageContent.createdAt,
+                    roomId: notification.roomId,
+                    ciphertext: notification.messageContent.ciphertext,
+                    nonce: notification.messageContent.nonce,
+                  };
+                  console.log("Using message content from notification (fast path)");
+                } else {
+                  // 폴백: PDS에서 조회 (이전 방식)
+                  console.log("Fetching message from PDS (fallback)");
+                  const msgRecord = await adapter.getMessage(notification.recordUri);
+                  if (msgRecord) {
+                    // URI 파싱하여 senderDid 추출
+                    const uriMatch = notification.recordUri.match(/at:\/\/([^/]+)\//);
+                    const senderDid = uriMatch ? uriMatch[1] : "";
+                    
+                    msg = {
+                      uri: notification.recordUri,
+                      senderDid: senderDid,
+                      createdAt: msgRecord.createdAt || new Date().toISOString(),
+                      roomId: msgRecord.roomId,
+                      ciphertext: String(msgRecord.ciphertext || ""),
+                      nonce: String(msgRecord.nonce || ""),
+                    };
+                  }
+                }
+                
+                if (msg) {
+                  console.log("[Client] Calling addMessageToState with message...");
+                  // 메시지를 상태에 추가 (adapter를 파라미터로 전달)
+                  await addMessageToState(msg, notification.roomId, adapter);
+                  console.log("[Client] addMessageToState completed");
+                } else {
+                  console.warn("[Client] ✗ No message object created");
+                }
+              } catch (error) {
+                console.error("[Client] ✗ Failed to process new message:", error);
+                // 실패 시 전체 재로드로 폴백
+                if (roomIdRef.current === notification.roomId) {
+                  console.log("[Client] Falling back to loadMessages()");
+                  await loadMessages();
+                }
+              }
+              await loadRooms(adapter);
+            } else {
+              console.log(`[Client] ✗ RoomId changed during processing. Was: ${notification.roomId}, Now: ${roomIdRef.current}`);
+            }
+          } else {
+            console.log(`[Client] ✗ RoomId mismatch or missing recordUri`);
+            console.log(`[Client]   - notification.roomId: ${notification.roomId}`);
+            console.log(`[Client]   - currentRoomId: ${currentRoomId || 'none'}`);
+            console.log(`[Client]   - notification.recordUri: ${notification.recordUri || 'missing'}`);
+            // 다른 방의 메시지이지만 채팅방 목록은 새로고침
+            await loadRooms(adapter);
+          }
         } else if (notification.type === "friend_request") {
           // 새 친구 신청 알림 - 자동으로 목록 새로고침 및 신청 목록 표시
           await loadFriendRequests(adapter);
           // 친구 목록 뷰로 전환하고 신청 목록 표시
           setCurrentView("friends");
           setShowRequests(true);
-            } else if (notification.type === "friend_accepted") {
-              // 친구 신청이 수락됨 - 친구 목록 새로고침
-              await loadFriends(adapter);
-              await loadFriendRequests(adapter);
-            } else if (notification.type === "friend_removed") {
-              // 친구가 삭제됨 - 친구 목록 새로고침
-              await loadFriends(adapter);
-            }
-          });
+        } else if (notification.type === "friend_accepted") {
+          // 친구 신청이 수락됨 - 친구 목록 새로고침
+          await loadFriends(adapter);
+          await loadFriendRequests(adapter);
+        } else if (notification.type === "friend_removed") {
+          // 친구가 삭제됨 - 친구 목록 새로고침
+          await loadFriends(adapter);
+        }
+      });
       // 자신의 DID로 구독 (친구 신청 알림 받기)
       gw.subscribeDid(adapter.getDid());
       setGateway(gw);
@@ -179,6 +388,9 @@ export default function Home() {
       
       // 친구 신청 목록 로드
       await loadFriendRequests(adapter);
+      
+      // 채팅방 목록 로드
+      await loadRooms(adapter);
     } catch (error) {
       console.error("Login error:", error);
       alert("Login failed: " + (error as Error).message);
@@ -206,8 +418,8 @@ export default function Home() {
     if (!pds || !roomId || !message.trim()) return;
 
     try {
-      // Room 키 가져오기
-      const key = roomKeyManager.getOrCreateRoomKey(roomId);
+      // Room 키 가져오기 (서버에서)
+      const key = await roomKeyManager.getOrCreateRoomKey(roomId);
 
       // 암호화
       const { ciphertext, nonce } = await encryptMessage(message, key);
@@ -217,14 +429,16 @@ export default function Home() {
       console.log("Message sent:", recordUri);
 
       // Room에 참여 등록 (아직 참여하지 않은 경우)
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const pdsEndpoint = "https://bsky.social";
+      const myDid = pds.getDid();
+      
       try {
-        const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-        const pdsEndpoint = "https://bsky.social";
         await fetch(`${API_URL}/api/rooms/${encodeURIComponent(roomId)}/join`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
-            did: pds.getDid(), 
+            did: myDid, 
             pdsEndpoint 
           }),
         });
@@ -232,31 +446,316 @@ export default function Home() {
         // 무시 (이미 참여했을 수 있음)
       }
 
-      // 메시지 목록 새로고침
-      await loadMessages();
+      // 자신의 PDS를 AppView에 구독 (메시지 감지를 위해)
+      try {
+        await fetch(`${API_URL}/api/subscribe`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            did: myDid, 
+            pdsEndpoint 
+          }),
+        });
+        console.log("Subscribed own PDS to AppView for message detection");
+      } catch (error) {
+        console.warn("Failed to subscribe own PDS to AppView:", error);
+      }
+
+      // 메시지를 로컬 상태에만 추가 (PDS 재조회 없이)
+      const now = new Date().toISOString();
+      
+      // 서버에 즉시 알림 요청 (다른 참여자들에게 즉시 전달)
+      console.log("[handleSendMessage] Notifying server about new message...");
+      console.log("[handleSendMessage] Message details:", {
+        recordUri,
+        senderDid: myDid,
+        roomId,
+        ciphertextLength: ciphertext.length,
+        nonceLength: nonce.length,
+        createdAt: now,
+      });
+      try {
+        const notifyResponse = await fetch(`${API_URL}/api/messages/notify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            recordUri: recordUri,
+            senderDid: myDid,
+            roomId: roomId,
+            ciphertext: ciphertext,
+            nonce: nonce,
+            createdAt: now,
+          }),
+        });
+        const notifyResult = await notifyResponse.json();
+        console.log("[handleSendMessage] ✓ Server notification response:", notifyResult);
+      } catch (error) {
+        console.warn("[handleSendMessage] ✗ Failed to notify server about new message:", error);
+        // 실패해도 계속 진행 (polling으로 나중에 감지됨)
+      }
+      // 프로필 정보 가져오기 (이미 로드된 profile 상태 사용)
+      const myProfile = profile || { did: myDid, handle: myDid };
+      const sentMessage = {
+        uri: recordUri,
+        senderDid: myDid,
+        createdAt: now,
+        roomId: roomId,
+        ciphertext: ciphertext,
+        nonce: nonce,
+        plaintext: message.trim(), // 이미 평문이므로 그대로 사용
+        decrypted: true,
+        profile: myProfile,
+      };
+      
+      setMessages((prev) => {
+        // 중복 체크
+        if (prev.some((m) => m.uri === recordUri)) {
+          return prev;
+        }
+        const updated = [...prev, sentMessage];
+        // 시간순으로 정렬
+        return updated.sort((a, b) => {
+          const timeA = new Date(a.createdAt).getTime();
+          const timeB = new Date(b.createdAt).getTime();
+          return timeA - timeB;
+        });
+      });
+      
+      // 채팅방 목록 새로고침 (last_message_at 업데이트 반영)
+      await loadRooms(pds);
+      
       setMessage("");
+      
+      // 메시지 전송 후 스크롤을 맨 아래로
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
     } catch (error) {
       console.error("Send error:", error);
       alert("Send failed: " + (error as Error).message);
     }
   };
 
-  const loadMessages = async () => {
-    if (!pds || !roomId) return;
+  // 단일 메시지를 복호화하고 프로필 정보를 가져와서 상태에 추가
+  const addMessageToState = async (msg: any, targetRoomId: string, pdsAdapter?: ClientPDSAdapter) => {
+    console.log("[addMessageToState] ===== Called =====");
+    console.log("[addMessageToState] msg:", { uri: msg.uri, senderDid: msg.senderDid, roomId: msg.roomId });
+    console.log("[addMessageToState] targetRoomId:", targetRoomId);
+    console.log("[addMessageToState] pds (from state):", !!pds);
+    console.log("[addMessageToState] pdsAdapter (parameter):", !!pdsAdapter);
+    
+    // pdsAdapter 파라미터가 있으면 사용, 없으면 상태의 pds 사용
+    const currentPds = pdsAdapter || pds;
+    
+    if (!currentPds || !targetRoomId) {
+      console.warn("[addMessageToState] ✗ Missing pds or targetRoomId, returning");
+      console.warn("[addMessageToState]   - currentPds:", !!currentPds);
+      console.warn("[addMessageToState]   - targetRoomId:", targetRoomId);
+      return;
+    }
 
     try {
+      // 복호화 및 프로필 정보 가져오기
+      console.log("[addMessageToState] Getting room key...");
+      const key = await roomKeyManager.getOrCreateRoomKey(targetRoomId);
+      console.log("[addMessageToState] Room key obtained, length:", key.length);
+      
+      // 필수 필드 검증
+      if (!msg.ciphertext || !msg.nonce) {
+        console.warn(`[addMessageToState] ✗ Message missing ciphertext or nonce:`, msg);
+        const newMsg = {
+          ...msg,
+          plaintext: "[Invalid message format]",
+          decrypted: false,
+          profile: { did: msg.senderDid, handle: msg.senderDid },
+        };
+        setMessages((prev) => {
+          // 중복 체크
+          if (prev.some((m) => m.uri === msg.uri)) {
+            return prev;
+          }
+          const updated = [...prev, newMsg];
+          // 시간순으로 정렬
+          return updated.sort((a, b) => {
+            const timeA = new Date(a.createdAt).getTime();
+            const timeB = new Date(b.createdAt).getTime();
+            return timeA - timeB;
+          });
+        });
+        return;
+      }
+
+      let plaintext: string;
+      let decrypted: boolean;
+      
+      try {
+        console.log("[addMessageToState] Decrypting message...");
+        plaintext = await decryptMessage(msg.ciphertext, msg.nonce, key);
+        decrypted = true;
+        console.log("[addMessageToState] ✓ Decryption successful, plaintext length:", plaintext.length);
+      } catch (error: any) {
+        console.error(`[addMessageToState] ✗ Decryption failed for message from ${msg.senderDid}:`, error.message || error);
+        plaintext = "[Decryption failed]";
+        decrypted = false;
+      }
+      
+      // 프로필 정보 가져오기
+      console.log("[addMessageToState] Getting profile for:", msg.senderDid);
+      let profile = { did: msg.senderDid, handle: msg.senderDid };
+      try {
+        profile = await currentPds.getProfile(msg.senderDid);
+        console.log("[addMessageToState] ✓ Profile obtained:", profile.handle || profile.did);
+      } catch (error) {
+        console.warn(`[addMessageToState] Failed to get profile for ${msg.senderDid}:`, error);
+      }
+      
+      const newMsg = {
+        ...msg,
+        plaintext,
+        decrypted,
+        profile,
+      };
+      
+      console.log("[addMessageToState] Updating messages state...");
+      console.log("[addMessageToState] New message:", { uri: newMsg.uri, plaintext: newMsg.plaintext.substring(0, 50) });
+      
+      setMessages((prev) => {
+        console.log("[addMessageToState] Current messages count:", prev.length);
+        // 중복 체크
+        if (prev.some((m) => m.uri === msg.uri)) {
+          console.log("[addMessageToState] ✗ Message already exists, skipping");
+          return prev;
+        }
+        const updated = [...prev, newMsg];
+        // 시간순으로 정렬
+        const sorted = updated.sort((a, b) => {
+          const timeA = new Date(a.createdAt).getTime();
+          const timeB = new Date(b.createdAt).getTime();
+          return timeA - timeB;
+        });
+        console.log("[addMessageToState] ✓ Message added, new count:", sorted.length);
+        
+        // 안 읽은 메시지 개수 업데이트 (현재 열려있는 채팅방이 아니면)
+        const currentRoomId = roomIdRef.current;
+        if (targetRoomId !== currentRoomId) {
+          console.log("[addMessageToState] Message in different room, updating unread count");
+          setUnreadCounts((prevCounts) => {
+            const updated = new Map(prevCounts);
+            const currentCount = updated.get(targetRoomId) || 0;
+            updated.set(targetRoomId, currentCount + 1);
+            console.log(`[addMessageToState] Unread count for ${targetRoomId}: ${currentCount + 1}`);
+            return updated;
+          });
+          
+          // 브라우저 알림 표시
+          showBrowserNotification(newMsg, targetRoomId).catch((error) => {
+            console.error("[addMessageToState] Failed to show notification:", error);
+          });
+          
+          // 채팅방 목록 새로고침 (서버에서 안 읽은 메시지 개수 업데이트)
+          if (pds) {
+            loadRooms(pds).catch((error) => {
+              console.error("[addMessageToState] Failed to reload rooms:", error);
+            });
+          }
+        }
+        
+        return sorted;
+      });
+      
+      // 스크롤을 맨 아래로
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
+      console.log("[addMessageToState] ===== Completed =====");
+    } catch (error) {
+      console.error("[addMessageToState] ✗ Failed to add message to state:", error);
+    }
+  };
+
+  // 브라우저 알림 표시 함수
+  const showBrowserNotification = async (message: any, roomId: string) => {
+    // 알림 권한 요청
+    if ("Notification" in window && Notification.permission === "default") {
+      await Notification.requestPermission();
+    }
+
+    if ("Notification" in window && Notification.permission === "granted") {
+      // 채팅방 이름 가져오기 (rooms에서 찾기)
+      const room = rooms.find((r) => r.room_id === roomId);
+      const roomName = room ? room.room_id : roomId;
+      
+      // 발신자 이름
+      const senderName = message.profile?.displayName || message.profile?.handle || message.senderDid;
+      
+      // 메시지 내용 (복호화된 경우만)
+      const messageText = message.decrypted && message.plaintext 
+        ? message.plaintext.substring(0, 100) 
+        : "새 메시지";
+      
+      new Notification(`${senderName}`, {
+        body: messageText,
+        icon: message.profile?.avatar || undefined,
+        tag: roomId, // 같은 채팅방 알림은 덮어쓰기
+        requireInteraction: false,
+      });
+      
+      console.log(`[Notification] Browser notification shown for room ${roomId}`);
+    } else {
+      console.log("[Notification] Browser notifications not permitted");
+    }
+  };
+
+  const loadMessages = async () => {
+    if (!pds || !roomId) {
+      console.log(`Cannot load messages: pds=${!!pds}, roomId=${roomId}`);
+      setIsLoadingMessages(false);
+      return;
+    }
+
+    setIsLoadingMessages(true);
+    try {
+      console.log(`Loading messages for room: ${roomId}`);
       const msgs = await pds.listRoomMessages(roomId);
+      console.log(`Loaded ${msgs.length} messages for room ${roomId}`, msgs);
+      
+      if (msgs.length === 0) {
+        console.log("No messages found. This might be a new room or messages haven't been indexed yet.");
+        setMessages([]);
+        setIsLoadingMessages(false);
+        return;
+      }
       
       // 복호화 및 프로필 정보 가져오기
-      const key = roomKeyManager.getOrCreateRoomKey(roomId);
+      const key = await roomKeyManager.getOrCreateRoomKey(roomId);
+      console.log(`Using key for room ${roomId}, key length: ${key.length}`);
+      
       const decrypted = await Promise.all(
         msgs.map(async (msg) => {
+          // 필수 필드 검증
+          if (!msg.ciphertext || !msg.nonce) {
+            console.warn(`Message missing ciphertext or nonce:`, msg);
+            return {
+              ...msg,
+              plaintext: "[Invalid message format]",
+              decrypted: false,
+              profile: { did: msg.senderDid, handle: msg.senderDid },
+            };
+          }
+
           try {
+            console.log(`Decrypting message from ${msg.senderDid}`, {
+              ciphertextLength: msg.ciphertext?.length || 0,
+              nonceLength: msg.nonce?.length || 0,
+              nonce: msg.nonce?.substring(0, 20),
+            });
+            
             const plaintext = await decryptMessage(
               msg.ciphertext,
               msg.nonce,
               key
             );
+            console.log(`Successfully decrypted message: ${plaintext.substring(0, 50)}...`);
             
             // 프로필 정보 가져오기
             let profile = { did: msg.senderDid, handle: msg.senderDid };
@@ -274,10 +773,13 @@ export default function Home() {
             };
           } catch (error: any) {
             // 복호화 실패는 정상적인 경우일 수 있음 (다른 키로 암호화된 메시지)
-            // 개발 환경에서만 상세 에러 로그 출력
-            if (process.env.NODE_ENV === 'development') {
-              console.warn(`Decryption failed for message from ${msg.senderDid}:`, error.message || error);
-            }
+            console.error(`Decryption failed for message from ${msg.senderDid}:`, error.message || error);
+            console.error(`Message details:`, {
+              ciphertext: msg.ciphertext?.substring(0, 50),
+              nonce: msg.nonce?.substring(0, 20),
+              keyLength: key.length,
+              error: error.message,
+            });
             
             // 프로필 정보는 가져오기
             let profile = { did: msg.senderDid, handle: msg.senderDid };
@@ -297,9 +799,24 @@ export default function Home() {
         })
       );
 
-      setMessages(decrypted.reverse()); // 최신순
+      // 시간순으로 정렬 (오래된 것부터 최신 순서)
+      const sorted = decrypted.sort((a, b) => {
+        const timeA = new Date(a.createdAt).getTime();
+        const timeB = new Date(b.createdAt).getTime();
+        return timeA - timeB;
+      });
+      
+      setMessages(sorted);
+      
+      // 메시지 로드 후 스크롤을 맨 아래로
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
     } catch (error) {
       console.error("Load messages error:", error);
+      setMessages([]); // 에러 발생 시 빈 배열로 설정
+    } finally {
+      setIsLoadingMessages(false);
     }
   };
 
@@ -360,16 +877,24 @@ export default function Home() {
     const myDid = pds.getDid();
     const newRoomId = generateDMRoomId(myDid, friendDid);
     
-    setRoomId(newRoomId);
+    await handleSelectRoom(newRoomId);
+  };
+
+  const handleSelectRoom = async (selectedRoomId: string) => {
+    if (!pds) return;
+
+    setRoomId(selectedRoomId);
+    roomIdRef.current = selectedRoomId; // ref도 업데이트
     setCurrentView("chat");
 
     // Room에 참여 등록
     try {
       const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
       const pdsEndpoint = "https://bsky.social";
+      const myDid = pds.getDid();
       
-      // 자신과 친구 모두 Room에 참여 등록
-      await fetch(`${API_URL}/api/rooms/${encodeURIComponent(newRoomId)}/join`, {
+      // Room에 참여 등록
+      const joinResponse = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(selectedRoomId)}/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -378,15 +903,107 @@ export default function Home() {
         }),
       });
 
-      // Gateway 구독
-      if (gateway) {
-        gateway.subscribe(newRoomId);
+      if (!joinResponse.ok) {
+        throw new Error("Failed to join room");
       }
 
-      // 메시지 로드
-      await loadMessages();
+      // Room 참여자 목록 가져오기
+      const membersResponse = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(selectedRoomId)}/members`);
+      if (membersResponse.ok) {
+        const members = await membersResponse.json();
+        console.log(`Room members:`, members);
+        
+        // 모든 참여자의 PDS를 AppView에 구독 (상대방 메시지 감지를 위해)
+        for (const member of members) {
+          if (member.member_did !== myDid && member.pds_endpoint) {
+            try {
+              await fetch(`${API_URL}/api/subscribe`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ 
+                  did: member.member_did, 
+                  pdsEndpoint: member.pds_endpoint 
+                }),
+              });
+              console.log(`Subscribed to ${member.member_did}'s PDS for room ${selectedRoomId}`);
+            } catch (error) {
+              console.warn(`Failed to subscribe to ${member.member_did}'s PDS:`, error);
+            }
+          }
+        }
+      }
+
+      // Gateway는 DID로 구독하므로 roomId 구독 불필요
+      // (이미 로그인 시 DID로 구독됨)
+
+      // 채팅방 목록 새로고침
+      await loadRooms(pds);
+      
+      // 메시지는 useEffect에서 자동으로 로드됨
     } catch (error) {
       console.error("Failed to join room:", error);
+      alert("채팅방 참여 실패: " + (error as Error).message);
+    }
+  };
+
+  const handleLeaveRoom = async () => {
+    if (!pds || !roomId) return;
+
+    if (!confirm("채팅방에서 나가시겠습니까? 나가면 상대방은 더 이상 당신의 메시지를 조회할 수 없습니다.")) {
+      return;
+    }
+
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const myDid = pds.getDid();
+
+      const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(roomId)}/leave`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ did: myDid }),
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || "Failed to leave room");
+      }
+
+      // Gateway 구독 해제
+      if (gateway) {
+        gateway.unsubscribe(roomId);
+      }
+
+      // UI 업데이트
+      setRoomId("");
+      roomIdRef.current = ""; // ref도 업데이트
+      setMessages([]);
+      await loadRooms(pds);
+
+      alert("채팅방에서 나갔습니다.");
+    } catch (error) {
+      console.error("Failed to leave room:", error);
+      alert("채팅방 나가기 실패: " + (error as Error).message);
+    }
+  };
+
+  const handleDeleteMessage = async (recordUri: string) => {
+    if (!pds || !confirm("이 메시지를 삭제하시겠습니까?")) {
+      return;
+    }
+
+    try {
+      await pds.deleteMessage(recordUri);
+      
+      // 메시지 목록에서 제거
+      setMessages((prev) => prev.filter((msg) => msg.uri !== recordUri));
+      
+      // 메시지 목록 새로고침
+      await loadMessages();
+      
+      alert("메시지가 삭제되었습니다.");
+    } catch (error) {
+      console.error("Failed to delete message:", error);
+      alert("메시지 삭제 실패: " + (error as Error).message);
     }
   };
 
@@ -480,6 +1097,34 @@ export default function Home() {
       } else {
         alert("친구 신청 실패: " + errorMessage);
       }
+    }
+  };
+
+  const loadRooms = async (adapter: ClientPDSAdapter) => {
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const myDid = adapter.getDid();
+
+      const response = await fetch(`${API_URL}/api/rooms?did=${encodeURIComponent(myDid)}`);
+      if (response.ok) {
+        const serverRooms = await response.json();
+        console.log("Loaded rooms:", serverRooms);
+        setRooms(serverRooms);
+        
+        // 서버에서 받은 안 읽은 메시지 개수를 상태에 업데이트
+        const unreadMap = new Map<string, number>();
+        serverRooms.forEach((room: any) => {
+          if (room.unread_count > 0) {
+            unreadMap.set(room.room_id, room.unread_count);
+          }
+        });
+        setUnreadCounts(unreadMap);
+      } else {
+        const errorText = await response.text();
+        console.error("Failed to load rooms:", response.status, errorText);
+      }
+    } catch (error) {
+      console.error("Failed to load rooms:", error);
     }
   };
 
@@ -1209,17 +1854,106 @@ export default function Home() {
           <div>
             <h2 style={{ marginTop: 0 }}>채팅</h2>
             
-            {roomId && (
-              <div style={{ marginBottom: "1rem", padding: "0.5rem", backgroundColor: "#e3f2fd", borderRadius: "4px" }}>
-                <div style={{ fontSize: "0.9rem", color: "#666" }}>
-                  현재 채팅방: {roomId}
-                </div>
+            {!roomId && (
+              <div style={{ marginBottom: "2rem" }}>
+                <h3>채팅방 목록</h3>
+                {rooms.length === 0 ? (
+                  <p style={{ color: "#666" }}>채팅방이 없습니다. 친구 목록에서 친구를 선택하여 채팅을 시작하세요.</p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    {rooms.map((room) => (
+                      <div
+                        key={room.room_id}
+                        onClick={() => handleSelectRoom(room.room_id)}
+                        style={{
+                          padding: "1rem",
+                          border: "1px solid #ccc",
+                          borderRadius: "4px",
+                          cursor: "pointer",
+                          backgroundColor: roomId === room.room_id ? "#e3f2fd" : "#fff",
+                          position: "relative",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: "bold", marginBottom: "0.25rem" }}>
+                              {room.room_id}
+                            </div>
+                            <div style={{ fontSize: "0.9rem", color: "#666" }}>
+                              참여자: {room.member_count}명
+                            </div>
+                            {room.last_message_at && (
+                              <div style={{ fontSize: "0.8rem", color: "#999", marginTop: "0.25rem" }}>
+                                마지막 메시지: {new Date(room.last_message_at).toLocaleString()}
+                              </div>
+                            )}
+                          </div>
+                          {unreadCounts.get(room.room_id) > 0 && (
+                            <span
+                              style={{
+                                backgroundColor: "#dc3545",
+                                color: "white",
+                                borderRadius: "50%",
+                                minWidth: "24px",
+                                height: "24px",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontSize: "0.75rem",
+                                fontWeight: "bold",
+                                padding: "0 0.5rem",
+                              }}
+                            >
+                              {unreadCounts.get(room.room_id)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
-            {!roomId && (
-              <div style={{ padding: "2rem", textAlign: "center", color: "#666" }}>
-                <p>친구 목록에서 친구를 선택하여 채팅을 시작하세요.</p>
+            {roomId && (
+              <div style={{ marginBottom: "1rem", padding: "0.5rem", backgroundColor: "#e3f2fd", borderRadius: "4px" }}>
+                <div style={{ fontSize: "0.9rem", color: "#666", marginBottom: "0.5rem" }}>
+                  현재 채팅방: {roomId}
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <button
+                    onClick={() => {
+                      setRoomId("");
+                      roomIdRef.current = ""; // ref도 업데이트
+                      setMessages([]);
+                    }}
+                    style={{
+                      padding: "0.25rem 0.5rem",
+                      backgroundColor: "#6c757d",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "0.8rem",
+                    }}
+                  >
+                    채팅방 목록으로
+                  </button>
+                  <button
+                    onClick={handleLeaveRoom}
+                    style={{
+                      padding: "0.25rem 0.5rem",
+                      backgroundColor: "#dc3545",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      fontSize: "0.8rem",
+                    }}
+                  >
+                    채팅방 나가기
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1234,39 +1968,81 @@ export default function Home() {
                     maxHeight: "500px",
                     overflowY: "auto",
                     marginBottom: "1rem",
+                    display: "flex",
+                    flexDirection: "column",
                   }}
                 >
-                  {messages.length === 0 ? (
-                    <p style={{ color: "#666" }}>메시지가 없습니다.</p>
+                  {isLoadingMessages ? (
+                    <p style={{ color: "#666", margin: "auto" }}>메시지 내용 불러오는 중...</p>
+                  ) : messages.length === 0 ? (
+                    <p style={{ color: "#666", margin: "auto" }}>메시지가 없습니다.</p>
                   ) : (
-                    messages.map((msg, idx) => (
-                      <div
-                        key={idx}
-                        style={{
-                          padding: "0.5rem",
-                          marginBottom: "0.5rem",
-                          backgroundColor: msg.senderDid === pds?.getDid() ? "#e3f2fd" : "#f5f5f5",
-                          borderRadius: "4px",
-                          borderLeft: msg.senderDid === pds?.getDid() ? "3px solid #2196f3" : "3px solid #ccc",
-                        }}
-                      >
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.25rem" }}>
-                          <div style={{ fontSize: "0.9rem", fontWeight: "bold", color: "#333" }}>
-                            {msg.profile?.displayName || msg.profile?.handle || msg.senderDid || "Unknown"}
-                            {msg.senderDid === pds?.getDid() && " (나)"}
+                    <>
+                      {messages.map((msg, idx) => {
+                        const isMyMessage = msg.senderDid === pds?.getDid();
+                        return (
+                          <div
+                            key={msg.uri || idx}
+                            style={{
+                              padding: "0.75rem",
+                              marginBottom: "0.5rem",
+                              borderRadius: "12px",
+                              maxWidth: "70%",
+                              alignSelf: isMyMessage ? "flex-end" : "flex-start",
+                              backgroundColor: isMyMessage ? "#0070f3" : "#f0f0f0",
+                              color: isMyMessage ? "white" : "#333",
+                              marginLeft: isMyMessage ? "auto" : "0",
+                              marginRight: isMyMessage ? "0" : "auto",
+                            }}
+                          >
+                            {!isMyMessage && (
+                              <div style={{ fontSize: "0.75rem", fontWeight: "bold", marginBottom: "0.25rem", opacity: 0.8 }}>
+                                {msg.profile?.displayName || msg.profile?.handle || msg.senderDid || "Unknown"}
+                              </div>
+                            )}
+                            <div style={{ 
+                              fontSize: "0.9rem",
+                              wordBreak: "break-word",
+                              color: isMyMessage ? "white" : (msg.decrypted ? "#000" : "#f44336"),
+                              fontStyle: msg.decrypted ? "normal" : "italic"
+                            }}>
+                              {msg.plaintext}
+                            </div>
+                            <div style={{ 
+                              display: "flex", 
+                              justifyContent: "space-between", 
+                              alignItems: "center", 
+                              marginTop: "0.25rem",
+                              fontSize: "0.7rem",
+                              opacity: 0.7
+                            }}>
+                              <div>
+                                {new Date(msg.createdAt).toLocaleTimeString()}
+                              </div>
+                              {isMyMessage && msg.uri && (
+                                <button
+                                  onClick={() => handleDeleteMessage(msg.uri)}
+                                  style={{
+                                    padding: "0.15rem 0.4rem",
+                                    backgroundColor: "rgba(255, 255, 255, 0.2)",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    fontSize: "0.7rem",
+                                    marginLeft: "0.5rem",
+                                  }}
+                                  title="메시지 삭제"
+                                >
+                                  삭제
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          <div style={{ fontSize: "0.8rem", color: "#666" }}>
-                            {new Date(msg.createdAt).toLocaleString()}
-                          </div>
-                        </div>
-                        <div style={{ 
-                          color: msg.decrypted ? "#000" : "#f44336",
-                          fontStyle: msg.decrypted ? "normal" : "italic"
-                        }}>
-                          {msg.plaintext}
-                        </div>
-                      </div>
-                    ))
+                        );
+                      })}
+                      <div ref={messagesEndRef} />
+                    </>
                   )}
                 </div>
 

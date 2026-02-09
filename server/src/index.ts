@@ -46,6 +46,50 @@ app.post("/api/subscribe", async (req, res) => {
   res.json({ success: true });
 });
 
+// 메시지 즉시 알림 (메시지 전송 후 즉시 호출)
+app.post("/api/messages/notify", async (req, res) => {
+  console.log("[API] ===== /api/messages/notify called =====");
+  console.log("[API] Request body:", {
+    recordUri: req.body.recordUri,
+    senderDid: req.body.senderDid,
+    roomId: req.body.roomId,
+    ciphertextLength: req.body.ciphertext?.length,
+    nonceLength: req.body.nonce?.length,
+    createdAt: req.body.createdAt,
+  });
+  
+  try {
+    const { recordUri, senderDid, roomId, ciphertext, nonce, createdAt } = req.body;
+    
+    if (!recordUri || !senderDid || !roomId || !ciphertext || !nonce) {
+      console.error("[API] ✗ Missing required fields");
+      return res.status(400).json({ 
+        success: false, 
+        error: "Missing required fields: recordUri, senderDid, roomId, ciphertext, nonce" 
+      });
+    }
+
+    console.log("[API] Calling indexer.notifyMessageImmediately...");
+    await indexer.notifyMessageImmediately(
+      recordUri,
+      senderDid,
+      roomId,
+      ciphertext,
+      nonce,
+      createdAt || new Date().toISOString()
+    );
+    console.log("[API] ✓ indexer.notifyMessageImmediately completed");
+
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error("[API] ✗ Error notifying message:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message || "Failed to notify message" 
+    });
+  }
+});
+
 // Room 생성/참여
 app.post("/api/rooms/:roomId/join", async (req, res) => {
   const { roomId } = req.params;
@@ -53,9 +97,11 @@ app.post("/api/rooms/:roomId/join", async (req, res) => {
   
   const db = getDB();
   
-  // Room이 없으면 생성
+  // Room이 없으면 생성 (last_message_at도 함께 초기화)
   await db.query(
-    "INSERT INTO rooms (room_id) VALUES ($1) ON CONFLICT (room_id) DO NOTHING",
+    `INSERT INTO rooms (room_id, last_message_at) 
+     VALUES ($1, NOW()) 
+     ON CONFLICT (room_id) DO NOTHING`,
     [roomId]
   );
   
@@ -80,6 +126,141 @@ app.get("/api/rooms/:roomId/members", async (req, res) => {
     [roomId]
   );
   res.json(result.rows);
+});
+
+// Room 나가기
+app.delete("/api/rooms/:roomId/leave", async (req, res) => {
+  const { roomId } = req.params;
+  const { did } = req.body;
+  const db = getDB();
+
+  if (!did) {
+    return res.status(400).json({ success: false, error: "did is required" });
+  }
+
+  try {
+    // room_members에서 해당 사용자 삭제
+    await db.query(
+      "DELETE FROM room_members WHERE room_id = $1 AND member_did = $2",
+      [roomId, did]
+    );
+
+    // 참여자가 없으면 room도 삭제 (선택적)
+    const remainingMembers = await db.query(
+      "SELECT COUNT(*) as count FROM room_members WHERE room_id = $1",
+      [roomId]
+    );
+
+    if (remainingMembers.rows[0].count === "0") {
+      await db.query("DELETE FROM rooms WHERE room_id = $1", [roomId]);
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to leave room:", error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// 채팅방 목록 조회 (사용자가 참여한 방 목록, 최신 메시지 순으로 정렬, 안 읽은 메시지 개수 포함)
+app.get("/api/rooms", async (req, res) => {
+  const { did } = req.query;
+  const db = getDB();
+
+  if (!did) {
+    return res.status(400).json({ success: false, error: "did is required" });
+  }
+
+  try {
+    // 사용자가 참여한 방 목록 조회 (최신 메시지 순으로 정렬, 안 읽은 메시지 개수 포함)
+    // 서브쿼리로 실제 메시지 개수를 세어서 정확한 안 읽은 메시지 개수 계산
+    const result = await db.query(
+      `SELECT r.room_id, r.created_at, r.last_message_at, r.last_message_id,
+              COUNT(DISTINCT rm.member_did) as member_count,
+              COALESCE(r.last_message_at, r.created_at) as sort_time,
+              rm.last_read_message_id,
+              COALESCE((
+                SELECT COUNT(*) 
+                FROM msg_index mi 
+                WHERE mi.room_id = r.room_id 
+                  AND (rm.last_read_message_id IS NULL OR mi.id > rm.last_read_message_id)
+              ), 0)::INTEGER as unread_count
+       FROM rooms r
+       INNER JOIN room_members rm ON r.room_id = rm.room_id
+       WHERE rm.member_did = $1
+       GROUP BY r.room_id, r.created_at, r.last_message_at, r.last_message_id, rm.last_read_message_id
+       ORDER BY sort_time DESC`,
+      [did]
+    );
+
+    console.log(`[API] Loaded ${result.rows.length} rooms for DID ${did}`);
+    result.rows.forEach((room: any) => {
+      console.log(`[API] Room ${room.room_id}: last_message_id=${room.last_message_id}, last_read_message_id=${room.last_read_message_id}, unread_count=${room.unread_count}`);
+    });
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Failed to get rooms list:", error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// 마지막 읽은 메시지 ID 업데이트
+app.post("/api/rooms/:roomId/read", async (req, res) => {
+  const { roomId } = req.params;
+  const { did, messageId } = req.body;
+  const db = getDB();
+
+  if (!did) {
+    return res.status(400).json({ success: false, error: "did is required" });
+  }
+
+  try {
+    console.log(`[API] Updating last read message for room ${roomId}, did: ${did}, messageId: ${messageId || 'auto'}`);
+    
+    // messageId가 제공되면 해당 ID로, 없으면 방의 마지막 메시지 ID로 업데이트
+    let targetMessageId = messageId;
+    if (!targetMessageId) {
+      const roomResult = await db.query(
+        "SELECT last_message_id FROM rooms WHERE room_id = $1",
+        [roomId]
+      );
+      if (roomResult.rows.length > 0) {
+        targetMessageId = roomResult.rows[0].last_message_id;
+        console.log(`[API] Using room's last_message_id: ${targetMessageId}`);
+      } else {
+        console.log(`[API] Room ${roomId} not found or has no messages`);
+      }
+    }
+
+    if (targetMessageId) {
+      const updateResult = await db.query(
+        `UPDATE room_members 
+         SET last_read_message_id = $1 
+         WHERE room_id = $2 AND member_did = $3`,
+        [targetMessageId, roomId, did]
+      );
+      console.log(`[API] Updated last_read_message_id: ${updateResult.rowCount} row(s) affected`);
+      
+      if (updateResult.rowCount === 0) {
+        console.warn(`[API] No rows updated. Room member might not exist: roomId=${roomId}, did=${did}`);
+      }
+    } else {
+      // 메시지가 없는 경우 NULL로 설정
+      const updateResult = await db.query(
+        `UPDATE room_members 
+         SET last_read_message_id = NULL 
+         WHERE room_id = $1 AND member_did = $2`,
+        [roomId, did]
+      );
+      console.log(`[API] Set last_read_message_id to NULL: ${updateResult.rowCount} row(s) affected`);
+    }
+
+    res.json({ success: true, lastReadMessageId: targetMessageId });
+  } catch (error) {
+    console.error("Failed to update last read message:", error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
 });
 
 // Room 메시지 목록 조회
@@ -285,6 +466,85 @@ app.get("/api/friends", async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error("Failed to get friends list:", error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// Room 키 조회 또는 생성
+app.get("/api/rooms/:roomId/key", async (req, res) => {
+  const { roomId } = req.params;
+  const db = getDB();
+
+  try {
+    // 기존 키 조회
+    const result = await db.query(
+      "SELECT key_base64 FROM room_keys WHERE room_id = $1",
+      [roomId]
+    );
+
+    if (result.rows.length > 0) {
+      return res.json({ success: true, key: result.rows[0].key_base64 });
+    }
+
+    // 키가 없으면 생성 (32바이트 랜덤 키)
+    // 각 방마다 고유한 키를 생성 (이미 키가 있으면 생성하지 않음)
+    const crypto = await import("crypto");
+    const keyBytes = crypto.randomBytes(32);
+    const keyBase64 = keyBytes.toString("base64");
+
+    await db.query(
+      `INSERT INTO room_keys (room_id, key_base64, created_at, updated_at)
+       VALUES ($1, $2, NOW(), NOW())
+       ON CONFLICT (room_id) DO NOTHING`,
+      [roomId, keyBase64]
+    );
+    
+    // 다시 조회 (다른 프로세스가 동시에 생성했을 수 있음)
+    const retryResult = await db.query(
+      "SELECT key_base64 FROM room_keys WHERE room_id = $1",
+      [roomId]
+    );
+    
+    if (retryResult.rows.length > 0) {
+      return res.json({ success: true, key: retryResult.rows[0].key_base64 });
+    }
+
+    res.json({ success: true, key: keyBase64 });
+  } catch (error) {
+    console.error("Failed to get or create room key:", error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// Room 키 생성 (명시적 생성)
+app.post("/api/rooms/:roomId/key", async (req, res) => {
+  const { roomId } = req.params;
+  const { key } = req.body; // 클라이언트에서 키를 전달할 수도 있음
+  const db = getDB();
+
+  try {
+    let keyBase64: string;
+    
+    if (key) {
+      // 클라이언트에서 키를 전달한 경우 사용
+      keyBase64 = key;
+    } else {
+      // 서버에서 32바이트 랜덤 키 생성
+      const crypto = await import("crypto");
+      const keyBytes = crypto.randomBytes(32);
+      keyBase64 = keyBytes.toString("base64");
+    }
+
+    await db.query(
+      `INSERT INTO room_keys (room_id, key_base64, created_at, updated_at)
+       VALUES ($1, $2, NOW(), NOW())
+       ON CONFLICT (room_id) DO UPDATE SET key_base64 = $2, updated_at = NOW()`,
+      [roomId, keyBase64]
+    );
+
+    res.json({ success: true, key: keyBase64 });
+  } catch (error) {
+    console.error("Failed to create room key:", error);
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });

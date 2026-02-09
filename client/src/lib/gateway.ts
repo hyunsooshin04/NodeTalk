@@ -22,11 +22,13 @@ export class GatewayClient {
     this.ws = new WebSocket(GATEWAY_URL);
 
     this.ws.onopen = () => {
-      console.log("Gateway connected");
+      console.log("[Gateway Client] Connected to Gateway");
       if (this.roomId) {
+        console.log(`[Gateway Client] Re-subscribing to room: ${this.roomId}`);
         this.subscribe(this.roomId);
       }
       if (this.subscribedDid) {
+        console.log(`[Gateway Client] Re-subscribing to DID: ${this.subscribedDid}`);
         this.subscribeDid(this.subscribedDid);
       }
     };
@@ -34,11 +36,28 @@ export class GatewayClient {
     this.ws.onmessage = (event) => {
       try {
         const notification = JSON.parse(event.data) as PushNotification;
+        console.log("[Gateway Client] ===== Received notification =====");
+        console.log("[Gateway Client] Notification type:", notification.type);
+        console.log("[Gateway Client] Full notification:", JSON.stringify(notification, null, 2));
+        if (notification.type === "new_message") {
+          console.log("[Gateway Client] RoomId:", notification.roomId);
+          console.log("[Gateway Client] RecordUri:", notification.recordUri);
+          console.log("[Gateway Client] Has messageContent:", !!notification.messageContent);
+          if (notification.messageContent) {
+            console.log("[Gateway Client] MessageContent senderDid:", notification.messageContent.senderDid);
+            console.log("[Gateway Client] MessageContent ciphertext length:", notification.messageContent.ciphertext?.length);
+            console.log("[Gateway Client] MessageContent nonce length:", notification.messageContent.nonce?.length);
+          }
+        }
         if (this.onMessageCallback) {
+          console.log("[Gateway Client] Calling onMessageCallback...");
           this.onMessageCallback(notification);
+          console.log("[Gateway Client] onMessageCallback completed");
+        } else {
+          console.warn("[Gateway Client] ✗ No callback registered for notifications");
         }
       } catch (error) {
-        console.error("Error parsing gateway message:", error);
+        console.error("[Gateway Client] Error parsing gateway message:", error);
       }
     };
 
@@ -58,8 +77,12 @@ export class GatewayClient {
    */
   subscribe(roomId: string) {
     this.roomId = roomId;
+    console.log(`[Gateway Client] Subscribing to room: ${roomId}, ws state: ${this.ws?.readyState}`);
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: "subscribe", roomId }));
+      console.log(`[Gateway Client] Sent subscribe message for room: ${roomId}`);
+    } else {
+      console.warn(`[Gateway Client] WebSocket is not open (state: ${this.ws?.readyState}), will subscribe when connected`);
     }
   }
 
@@ -70,6 +93,18 @@ export class GatewayClient {
     this.subscribedDid = did;
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: "subscribe_did", did }));
+    }
+  }
+
+  /**
+   * Room 구독 해제
+   */
+  unsubscribe(roomId: string) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "unsubscribe", roomId }));
+    }
+    if (this.roomId === roomId) {
+      this.roomId = null;
     }
   }
 

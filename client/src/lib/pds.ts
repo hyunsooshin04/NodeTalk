@@ -153,6 +153,34 @@ export class ClientPDSAdapter {
   }
 
   /**
+   * 메시지 삭제 (PDS에서 레코드 삭제)
+   */
+  async deleteMessage(recordUri: string): Promise<void> {
+    if (!this.agent) {
+      throw new Error("Not logged in");
+    }
+
+    // URI 파싱: at://did:plc:xxx/com.nodetalk.chat.message/rkey
+    const match = recordUri.match(/at:\/\/([^/]+)\/([^/]+)\/(.+)/);
+    if (!match) {
+      throw new Error("Invalid record URI");
+    }
+
+    const [, repo, collection, rkey] = match;
+
+    // 자신의 레코드만 삭제 가능
+    if (repo !== this.did) {
+      throw new Error("Can only delete your own messages");
+    }
+
+    await this.agent.com.atproto.repo.deleteRecord({
+      repo: this.did,
+      collection,
+      rkey,
+    });
+  }
+
+  /**
    * Room의 메시지 목록 조회 (각 참여자의 PDS에서 직접 가져오기)
    */
   async listRoomMessages(roomId: string, limit = 50) {
@@ -201,13 +229,24 @@ export class ClientPDSAdapter {
         });
 
         const memberMessages = result.data.records
-          .filter((r) => (r.value as MessageRecord).roomId === roomId)
-          .map((r) => ({
-            uri: r.uri,
-            senderDid: memberDid,
-            createdAt: r.value.createdAt || new Date().toISOString(),
-            ...(r.value as MessageRecord),
-          }));
+          .filter((r) => {
+            if (!r.value) return false;
+            const record = r.value as any;
+            return record.roomId === roomId && record.ciphertext && record.nonce;
+          })
+          .map((r) => {
+            const record = r.value as any;
+            return {
+              uri: r.uri,
+              senderDid: memberDid,
+              createdAt: record.createdAt || new Date().toISOString(),
+              roomId: record.roomId,
+              ciphertext: String(record.ciphertext || ""),
+              nonce: String(record.nonce || ""),
+              $type: record.$type,
+            };
+          })
+          .filter((msg) => msg.ciphertext && msg.nonce); // 필수 필드가 있는 메시지만
         
         allMessages.push(...memberMessages);
       } catch (error: any) {

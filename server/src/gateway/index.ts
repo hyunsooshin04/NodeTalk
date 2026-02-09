@@ -46,7 +46,7 @@ export class RealtimeGateway {
           this.clients.set(roomId, new Set());
         }
         this.clients.get(roomId)!.add(ws);
-        console.log(`Client subscribed to room: ${roomId}`);
+        console.log(`[Gateway] Client subscribed to room: ${roomId} (total clients: ${this.clients.get(roomId)!.size})`);
       }
     } else if (message.type === "subscribe_did") {
       const { did } = message;
@@ -67,14 +67,20 @@ export class RealtimeGateway {
   }
 
   /**
-   * 새 메시지 알림 전달 (신호만, 내용 없음)
+   * 새 메시지 알림 전달 (메시지 내용 포함)
    */
   pushNotification(notification: PushNotification) {
     if (notification.type === "new_message") {
-      const { roomId, recordUri } = notification;
+      const { roomId, recordUri, messageContent } = notification;
+      console.log(`[Gateway] pushNotification called for room ${roomId}, recordUri: ${recordUri}`);
+      console.log(`[Gateway] messageContent:`, messageContent ? "present" : "missing");
+      
       const clients = this.clients.get(roomId || "");
+      console.log(`[Gateway] Clients for room ${roomId}:`, clients ? clients.size : 0);
+      console.log(`[Gateway] All subscribed rooms:`, Array.from(this.clients.keys()));
 
       if (!clients || clients.size === 0) {
+        console.log(`[Gateway] No clients subscribed to room ${roomId}. Available rooms: ${Array.from(this.clients.keys()).join(", ")}`);
         return;
       }
 
@@ -82,16 +88,31 @@ export class RealtimeGateway {
         type: "new_message",
         roomId,
         recordUri,
+        messageContent, // 메시지 내용 포함
       };
 
+      console.log(`[Gateway] Sending notification to ${clients.size} clients:`, JSON.stringify(message, null, 2));
+
       // 모든 구독자에게 알림 전달
-      clients.forEach((client) => {
+      let sentCount = 0;
+      let errorCount = 0;
+      clients.forEach((client, index) => {
+        console.log(`[Gateway] Client ${index + 1}/${clients.size} - readyState: ${client.readyState} (OPEN=1)`);
         if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify(message));
+          try {
+            client.send(JSON.stringify(message));
+            sentCount++;
+            console.log(`[Gateway] ✓ Successfully sent to client ${index + 1}`);
+          } catch (error) {
+            errorCount++;
+            console.error(`[Gateway] ✗ Error sending notification to client ${index + 1}:`, error);
+          }
+        } else {
+          console.warn(`[Gateway] ✗ Client ${index + 1} is not open (state: ${client.readyState})`);
         }
       });
 
-      console.log(`Pushed notification to ${clients.size} clients in room ${roomId}`);
+      console.log(`[Gateway] Result: Pushed notification to ${sentCount}/${clients.size} clients in room ${roomId} (errors: ${errorCount})`);
     } else if (notification.type === "friend_request") {
       const { toDid } = notification;
       const clients = this.didClients.get(toDid || "");
@@ -162,6 +183,45 @@ export class RealtimeGateway {
 
       console.log(`Pushed friend removed notification to ${clients.size} clients for DID ${friendDid}`);
     }
+  }
+
+  /**
+   * 특정 DID로 알림 전달 (방 참여자에게 직접 전송)
+   */
+  pushNotificationToDid(did: string, notification: PushNotification) {
+    const clients = this.didClients.get(did);
+
+    if (!clients || clients.size === 0) {
+      console.log(`[Gateway] No clients subscribed to DID ${did}`);
+      return;
+    }
+
+    const message: PushNotification = {
+      ...notification,
+    };
+
+    console.log(`[Gateway] Sending notification to ${clients.size} clients for DID ${did}:`, JSON.stringify(message, null, 2));
+
+    // 모든 구독자에게 알림 전달
+    let sentCount = 0;
+    let errorCount = 0;
+    clients.forEach((client, index) => {
+      console.log(`[Gateway] Client ${index + 1}/${clients.size} - readyState: ${client.readyState} (OPEN=1)`);
+      if (client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(JSON.stringify(message));
+          sentCount++;
+          console.log(`[Gateway] ✓ Successfully sent to client ${index + 1}`);
+        } catch (error) {
+          errorCount++;
+          console.error(`[Gateway] ✗ Error sending notification to client ${index + 1}:`, error);
+        }
+      } else {
+        console.warn(`[Gateway] ✗ Client ${index + 1} is not open (state: ${client.readyState})`);
+      }
+    });
+
+    console.log(`[Gateway] Result: Pushed notification to ${sentCount}/${clients.size} clients for DID ${did} (errors: ${errorCount})`);
   }
 
   /**

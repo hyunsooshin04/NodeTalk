@@ -31,6 +31,13 @@ export interface PushNotification {
   toDid?: string;
   requestId?: number;
   friendDid?: string;
+  // 메시지 내용 (PDS 조회 없이 바로 사용)
+  messageContent?: {
+    senderDid: string;
+    ciphertext: string;
+    nonce: string;
+    createdAt: string;
+  };
 }
 
 export interface PDSConfig {

@@ -4,8 +4,12 @@
 CREATE TABLE IF NOT EXISTS rooms (
   id SERIAL PRIMARY KEY,
   room_id VARCHAR(255) NOT NULL UNIQUE,
-  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  last_message_at TIMESTAMP,
+  last_message_id INTEGER REFERENCES msg_index(id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_rooms_last_message_at ON rooms(last_message_at DESC);
 
 -- 방 참여자 정보
 CREATE TABLE IF NOT EXISTS room_members (
@@ -14,6 +18,7 @@ CREATE TABLE IF NOT EXISTS room_members (
   member_did VARCHAR(255) NOT NULL,
   pds_endpoint VARCHAR(512),
   joined_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  last_read_message_id INTEGER REFERENCES msg_index(id),
   UNIQUE(room_id, member_did)
 );
 
@@ -59,3 +64,14 @@ CREATE TABLE IF NOT EXISTS friends (
 
 CREATE INDEX IF NOT EXISTS idx_friends_did1 ON friends(did1);
 CREATE INDEX IF NOT EXISTS idx_friends_did2 ON friends(did2);
+
+-- Room 키 관리 (Phase 1: 서버에서 키 생성 및 관리)
+CREATE TABLE IF NOT EXISTS room_keys (
+  id SERIAL PRIMARY KEY,
+  room_id VARCHAR(255) NOT NULL UNIQUE,
+  key_base64 TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_keys_room_id ON room_keys(room_id);
