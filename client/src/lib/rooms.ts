@@ -49,3 +49,13 @@ export function isDMRoom(roomId: string): boolean {
   return roomId.startsWith("dm-");
 }
 
+/**
+ * 그룹 채팅방용 Room ID 생성
+ */
+export function generateGroupRoomId(): string {
+  // 타임스탬프 + 랜덤 문자열로 고유한 ID 생성
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 9);
+  return `group-${timestamp}-${random}`;
+}
+

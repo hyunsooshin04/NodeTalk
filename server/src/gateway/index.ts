@@ -182,6 +182,40 @@ export class RealtimeGateway {
       });
 
       console.log(`Pushed friend removed notification to ${clients.size} clients for DID ${friendDid}`);
+    } else if (notification.type === "member_left" || notification.type === "member_joined") {
+      // 채팅방 멤버 변경 알림은 해당 채팅방을 구독한 모든 클라이언트에게 전송
+      const { roomId } = notification;
+      const clients = this.clients.get(roomId || "");
+
+      if (!clients || clients.size === 0) {
+        console.log(`[Gateway] No clients subscribed to room ${roomId} for member change notification`);
+        return;
+      }
+
+      const message: PushNotification = {
+        type: notification.type,
+        roomId,
+        memberDid: notification.memberDid,
+      };
+
+      console.log(`[Gateway] Sending ${notification.type} notification to ${clients.size} clients in room ${roomId}`);
+
+      // 모든 구독자에게 알림 전달
+      let sentCount = 0;
+      let errorCount = 0;
+      clients.forEach((client, index) => {
+        if (client.readyState === WebSocket.OPEN) {
+          try {
+            client.send(JSON.stringify(message));
+            sentCount++;
+          } catch (error) {
+            errorCount++;
+            console.error(`[Gateway] ✗ Error sending ${notification.type} notification to client ${index + 1}:`, error);
+          }
+        }
+      });
+
+      console.log(`[Gateway] Result: Pushed ${notification.type} notification to ${sentCount}/${clients.size} clients in room ${roomId} (errors: ${errorCount})`);
     }
   }
 

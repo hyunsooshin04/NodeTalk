@@ -105,6 +105,13 @@ app.post("/api/rooms/:roomId/join", async (req, res) => {
     [roomId]
   );
   
+  // 기존 참여자인지 확인
+  const existingMember = await db.query(
+    "SELECT member_did FROM room_members WHERE room_id = $1 AND member_did = $2",
+    [roomId, did]
+  );
+  const isNewMember = existingMember.rows.length === 0;
+  
   // 참여자 추가
   await db.query(
     `INSERT INTO room_members (room_id, member_did, pds_endpoint)
@@ -113,6 +120,23 @@ app.post("/api/rooms/:roomId/join", async (req, res) => {
      SET pds_endpoint = $3`,
     [roomId, did, pdsEndpoint]
   );
+  
+  // 새로 참여한 경우에만 나머지 참여자들에게 member_joined 알림 전송
+  if (isNewMember) {
+    const otherMembersResult = await db.query(
+      "SELECT member_did FROM room_members WHERE room_id = $1 AND member_did != $2",
+      [roomId, did]
+    );
+    const otherMemberDids = otherMembersResult.rows.map((row: any) => row.member_did);
+    
+    for (const memberDid of otherMemberDids) {
+      gateway.pushNotificationToDid(memberDid, {
+        type: "member_joined",
+        roomId,
+        memberDid: did,
+      });
+    }
+  }
   
   res.json({ success: true });
 });
@@ -139,6 +163,13 @@ app.delete("/api/rooms/:roomId/leave", async (req, res) => {
   }
 
   try {
+    // 나머지 참여자 목록 가져오기 (알림 전송용)
+    const remainingMembersResult = await db.query(
+      "SELECT member_did FROM room_members WHERE room_id = $1 AND member_did != $2",
+      [roomId, did]
+    );
+    const remainingMemberDids = remainingMembersResult.rows.map((row: any) => row.member_did);
+
     // room_members에서 해당 사용자 삭제
     await db.query(
       "DELETE FROM room_members WHERE room_id = $1 AND member_did = $2",
@@ -153,6 +184,15 @@ app.delete("/api/rooms/:roomId/leave", async (req, res) => {
 
     if (remainingMembers.rows[0].count === "0") {
       await db.query("DELETE FROM rooms WHERE room_id = $1", [roomId]);
+    }
+
+    // 나머지 참여자들에게 member_left 알림 전송
+    for (const memberDid of remainingMemberDids) {
+      gateway.pushNotificationToDid(memberDid, {
+        type: "member_left",
+        roomId,
+        memberDid: did,
+      });
     }
 
     res.json({ success: true });
@@ -174,9 +214,10 @@ app.get("/api/rooms", async (req, res) => {
   try {
     // 사용자가 참여한 방 목록 조회 (최신 메시지 순으로 정렬, 안 읽은 메시지 개수 포함)
     // 서브쿼리로 실제 메시지 개수를 세어서 정확한 안 읽은 메시지 개수 계산
+    // member_count는 서브쿼리로 전체 멤버 수를 계산
     const result = await db.query(
       `SELECT r.room_id, r.created_at, r.last_message_at, r.last_message_id,
-              COUNT(DISTINCT rm.member_did) as member_count,
+              (SELECT COUNT(*) FROM room_members rm2 WHERE rm2.room_id = r.room_id) as member_count,
               COALESCE(r.last_message_at, r.created_at) as sort_time,
               rm.last_read_message_id,
               COALESCE((

@@ -24,13 +24,14 @@ export interface RoomKey {
 }
 
 export interface PushNotification {
-  type: "new_message" | "friend_request" | "friend_accepted" | "friend_removed";
+  type: "new_message" | "friend_request" | "friend_accepted" | "friend_removed" | "member_left" | "member_joined";
   roomId?: string;
   recordUri?: string;
   fromDid?: string;
   toDid?: string;
   requestId?: number;
   friendDid?: string;
+  memberDid?: string; // 나간/들어온 멤버의 DID
   // 메시지 내용 (PDS 조회 없이 바로 사용)
   messageContent?: {
     senderDid: string;
@@ -45,4 +46,3 @@ export interface PDSConfig {
   did: string;
   handle?: string;
 }
-
