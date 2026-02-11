@@ -162,8 +162,24 @@ export function useRooms() {
       
       if (isDMRoom(room.room_id) && otherMembers.length === 1) {
         try {
+          // 서버에서 프로필 정보 가져오기
+          const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+          let displayName = null;
+          try {
+            const profileResponse = await fetch(`${API_URL}/api/profile/${encodeURIComponent(otherMembers[0].member_did)}`);
+            if (profileResponse.ok) {
+              const profileData = await profileResponse.json();
+              if (profileData.success && profileData.profile) {
+                displayName = profileData.profile.displayName;
+              }
+            }
+          } catch (error) {
+            console.warn("Failed to load profile from server:", error);
+          }
+          
+          // PDS에서 프로필 정보 가져오기
           const profile = await adapter.getProfile(otherMembers[0].member_did);
-          return profile.displayName || profile.handle || otherMembers[0].member_did;
+          return displayName || profile.displayName || profile.handle || otherMembers[0].member_did;
         } catch (error) {
           return otherMembers[0].member_did;
         }
@@ -172,8 +188,24 @@ export function useRooms() {
       const memberNames: string[] = [];
       for (const member of otherMembers.slice(0, 3)) {
         try {
+          // 서버에서 프로필 정보 가져오기
+          const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+          let displayName = null;
+          try {
+            const profileResponse = await fetch(`${API_URL}/api/profile/${encodeURIComponent(member.member_did)}`);
+            if (profileResponse.ok) {
+              const profileData = await profileResponse.json();
+              if (profileData.success && profileData.profile) {
+                displayName = profileData.profile.displayName;
+              }
+            }
+          } catch (error) {
+            console.warn("Failed to load profile from server:", error);
+          }
+          
+          // PDS에서 프로필 정보 가져오기
           const profile = await adapter.getProfile(member.member_did);
-          memberNames.push(profile.displayName || profile.handle || member.member_did);
+          memberNames.push(displayName || profile.displayName || profile.handle || member.member_did);
         } catch (error) {
           memberNames.push(member.member_did);
         }

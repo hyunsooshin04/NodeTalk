@@ -11,6 +11,8 @@ import ChatList from "@/components/ChatList";
 import ChatRoom from "@/components/ChatRoom";
 import FriendsList from "@/components/FriendsList";
 import ProfileEditor from "@/components/ProfileEditor";
+import FriendProfileView from "@/components/FriendProfileView";
+import type { Friend } from "@/lib/friends";
 import { useAuth } from "@/hooks/useAuth";
 import { useChat } from "@/hooks/useChat";
 import { useRooms } from "@/hooks/useRooms";
@@ -20,6 +22,7 @@ import { useProfile } from "@/hooks/useProfile";
 export default function Home() {
   const [roomKeyManager] = useState(() => new RoomKeyManager());
   const [currentView, setCurrentView] = useState<"chat" | "friends">("chat");
+  const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
   const roomIdRef = useRef<string>("");
 
   // 커스텀 훅들
@@ -52,27 +55,43 @@ export default function Home() {
               let msg;
               
               if ((notification as any).messageContent) {
+                const content = (notification as any).messageContent;
                 msg = {
                   uri: notification.recordUri,
-                  senderDid: (notification as any).messageContent.senderDid,
-                  createdAt: (notification as any).messageContent.createdAt,
+                  senderDid: content.senderDid,
+                  createdAt: content.createdAt,
                   roomId: notification.roomId,
-                  ciphertext: (notification as any).messageContent.ciphertext,
-                  nonce: (notification as any).messageContent.nonce,
+                  ciphertext: content.ciphertext,
+                  nonce: content.nonce,
+                  ...(content.files && content.files.length > 0 && { files: content.files }),
+                  // 하위 호환성
+                  ...(content.fileUrl && {
+                    fileUrl: content.fileUrl,
+                    fileName: content.fileName,
+                    mimeType: content.mimeType,
+                  }),
                 };
           } else {
                 const msgRecord = await adapter.getMessage(notification.recordUri);
                 if (msgRecord) {
                   const uriMatch = notification.recordUri.match(/at:\/\/([^/]+)\//);
                   const senderDid = uriMatch ? uriMatch[1] : "";
+                  const record = msgRecord as any;
                   
                   msg = {
                     uri: notification.recordUri,
                     senderDid: senderDid,
-                    createdAt: msgRecord.createdAt || new Date().toISOString(),
-                    roomId: msgRecord.roomId,
-                    ciphertext: String(msgRecord.ciphertext || ""),
-                    nonce: String(msgRecord.nonce || ""),
+                    createdAt: record.createdAt || new Date().toISOString(),
+                    roomId: record.roomId,
+                    ciphertext: String(record.ciphertext || ""),
+                    nonce: String(record.nonce || ""),
+                    ...(record.files && record.files.length > 0 && { files: record.files }),
+                    // 하위 호환성
+                    ...(record.fileUrl && {
+                      fileUrl: record.fileUrl,
+                      fileName: record.fileName,
+                      mimeType: record.mimeType,
+                    }),
                   };
                 }
               }
@@ -93,8 +112,8 @@ export default function Home() {
           }
         } else if (notification.type === "member_left") {
           // 채팅방에서 나간 멤버의 메시지 제거
-          if (notification.roomId === roomIdRef.current && notification.memberDid) {
-            chatHook.removeMessagesBySender(notification.memberDid);
+          if (notification.roomId === roomIdRef.current && (notification as any).memberDid) {
+            chatHook.removeMessagesBySender((notification as any).memberDid);
           }
           // 채팅방 목록 업데이트
           await roomsHook.loadRooms(adapter);
@@ -110,6 +129,22 @@ export default function Home() {
         await friendsHook.loadFriendRequests(adapter);
         } else if (notification.type === "friend_removed") {
         await friendsHook.loadFriends(adapter);
+      } else if (notification.type === "profile_updated") {
+        // 프로필 업데이트 알림을 받으면 친구 목록과 채팅방 목록을 다시 로드
+        await friendsHook.loadFriends(adapter);
+        
+        // 프로필 정보가 포함된 경우 메시지 목록의 프로필 정보 업데이트
+        const profileNotification = notification as any;
+        if (profileNotification.updatedDid && profileNotification.profileData) {
+          await chatHook.updateProfileInMessages(
+            profileNotification.updatedDid,
+            profileNotification.profileData,
+            adapter
+          );
+        }
+        
+        // 채팅방 목록과 이름 다시 로드 (프로필 변경으로 인한 이름 변경 반영)
+        await roomsHook.loadRooms(adapter);
       }
     },
   });
@@ -238,19 +273,67 @@ export default function Home() {
     return (
     <div style={{ 
       height: "100vh", 
-                  display: "flex",
+      width: "100vw",
+      display: "flex",
       flexDirection: "column",
-      backgroundColor: "#f3f2f1",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+      backgroundColor: "#1f1022",
+              color: "white",
+      fontFamily: "'Spline Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+      overflow: "hidden",
+      position: "relative"
     }}>
-      <Header
-        profile={profileHook.profile}
-        pdsDid={authHook.pds?.getDid() || null}
-        onShowProfile={() => profileHook.setShowProfile(!profileHook.showProfile)}
-        onLogout={authHook.handleLogout}
-      />
+      {/* Ambient Background Gradients */}
+      <div style={{
+        position: "fixed",
+        inset: 0,
+        pointerEvents: "none",
+        zIndex: 0,
+        overflow: "hidden"
+      }}>
+        <div style={{
+                  position: "absolute",
+          top: "-10%",
+          left: "-10%",
+          width: "40%",
+          height: "40%",
+          background: "radial-gradient(circle, rgba(209, 37, 244, 0.2) 0%, transparent 70%)",
+                  borderRadius: "50%",
+          filter: "blur(120px)"
+        }}></div>
+        <div style={{
+          position: "absolute",
+          bottom: "-10%",
+          right: "-10%",
+          width: "50%",
+          height: "50%",
+          background: "radial-gradient(circle, rgba(0, 240, 255, 0.1) 0%, transparent 70%)",
+          borderRadius: "50%",
+          filter: "blur(120px)"
+        }}></div>
+        <div style={{
+          position: "absolute",
+          top: "40%",
+          left: "30%",
+          width: "30%",
+          height: "30%",
+          background: "radial-gradient(circle, rgba(204, 255, 0, 0.05) 0%, transparent 70%)",
+          borderRadius: "50%",
+          filter: "blur(100px)"
+        }}></div>
+        </div>
 
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+      {/* Main Layout Container */}
+      <div style={{ 
+        position: "relative", 
+        zIndex: 10, 
+        flex: 1, 
+        display: "flex", 
+                  width: "100%",
+        height: "100%", 
+        padding: "1rem", 
+        gap: "1rem",
+        overflow: "hidden"
+      }}>
         <Sidebar
           currentView={currentView}
           onViewChange={setCurrentView}
@@ -278,7 +361,6 @@ export default function Home() {
             roomsHook.setShowCreateGroup(false);
             roomsHook.setSelectedFriendsForGroup(new Set());
           }}
-          showRequests={friendsHook.showRequests}
           friendRequests={friendsHook.friendRequests}
           sentRequests={friendsHook.sentRequests}
           addFriendInput={friendsHook.addFriendInput}
@@ -289,18 +371,70 @@ export default function Home() {
           onCancelFriendRequest={(requestId) => friendsHook.handleCancelFriendRequest(requestId, authHook.pds || undefined)}
                        onStartChat={handleStartChat}
                        onRemoveFriend={(friendDid) => friendsHook.handleRemoveFriend(friendDid, authHook.pds || undefined)}
+                       onShowProfile={() => profileHook.setShowProfile(true)}
+                       onSelectFriend={setSelectedFriend}
+                       onSelectRequest={async (request) => {
+                         // 서버에서 최신 프로필 정보 가져오기
+                         try {
+                           const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+                           const response = await fetch(`${API_URL}/api/profile/${encodeURIComponent(request.from_did)}`);
+                           
+                           let displayName = request.from_displayName;
+                           if (response.ok) {
+                             const data = await response.json();
+                             if (data.success && data.profile) {
+                               displayName = data.profile.displayName || displayName;
+                             }
+                           }
+                           
+                           // 친구 신청을 Friend 타입으로 변환
+                           const friendFromRequest: Friend = {
+                             did: request.from_did,
+                             handle: request.from_handle,
+                             displayName: displayName,
+                             addedAt: request.created_at || new Date().toISOString(),
+                           };
+                           setSelectedFriend(friendFromRequest);
+                         } catch (error) {
+                           console.error("Failed to load profile for friend request:", error);
+                           // 프로필 로드 실패 시 기본 정보만 사용
+                           const friendFromRequest: Friend = {
+                             did: request.from_did,
+                             handle: request.from_handle,
+                             displayName: request.from_displayName,
+                             addedAt: request.created_at || new Date().toISOString(),
+                           };
+                           setSelectedFriend(friendFromRequest);
+                         }
+                       }}
         />
 
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: "white" }}>
+        {/* Main Stage (Chat Window) */}
+        <div style={{ 
+          flex: 1, 
+                            display: "flex",
+          flexDirection: "column", 
+          overflow: "hidden",
+          background: "rgba(31, 16, 34, 0.4)",
+          backdropFilter: "blur(16px)",
+          WebkitBackdropFilter: "blur(16px)",
+          border: "1px solid rgba(255, 255, 255, 0.05)",
+          borderRadius: "1rem",
+          position: "relative"
+        }}>
           {profileHook.showProfile && (
             <ProfileEditor
               profile={profileHook.profile}
               pdsDid={authHook.pds?.getDid() || null}
               profileDisplayName={profileHook.profileDisplayName}
               profileDescription={profileHook.profileDescription}
+              profileAvatarUrl={profileHook.profileAvatarUrl}
               onDisplayNameChange={profileHook.setProfileDisplayName}
               onDescriptionChange={profileHook.setProfileDescription}
+              onAvatarUrlChange={profileHook.setProfileAvatarUrl}
               onUpdateProfile={() => profileHook.handleUpdateProfile(authHook.pds)}
+              onUploadAvatar={profileHook.uploadAvatar}
+              onClose={() => profileHook.setShowProfile(false)}
             />
           )}
 
@@ -315,6 +449,7 @@ export default function Home() {
               onMessageChange={chatHook.setMessage}
               onSendMessage={chatHook.handleSendMessage}
               onDeleteMessage={chatHook.handleDeleteMessage}
+              onUploadFile={chatHook.uploadFile}
               onLeaveRoom={() => roomsHook.handleLeaveRoom(authHook.pds, roomsHook.roomId, authHook.gateway)}
               onInviteToRoom={async (friendDid) => {
                 if (!authHook.pds) return;
@@ -331,13 +466,27 @@ export default function Home() {
                               display: "flex", 
                               alignItems: "center", 
               justifyContent: "center",
-              color: "#605e5c",
+              color: "rgba(255, 255, 255, 0.5)",
               fontSize: "0.875rem"
             }}>
               <p>채팅방을 선택하세요</p>
                               </div>
-                              )}
-                            </div>
+          )}
+
+          {currentView === "friends" && (
+            <FriendProfileView
+              friend={selectedFriend}
+              onStartChat={handleStartChat}
+              onRemoveFriend={(friendDid) => {
+                friendsHook.handleRemoveFriend(friendDid, authHook.pds || undefined);
+                if (selectedFriend?.did === friendDid) {
+                  setSelectedFriend(null);
+                }
+              }}
+              onClose={() => setSelectedFriend(null)}
+            />
+          )}
+          </div>
       </div>
     </div>
   );

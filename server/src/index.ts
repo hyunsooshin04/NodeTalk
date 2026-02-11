@@ -2,6 +2,8 @@ import express from "express";
 import { initDB, setupSchema, getDB } from "./db/index.js";
 import { AppViewIndexer } from "./appview/indexer.js";
 import { RealtimeGateway } from "./gateway/index.js";
+import { initBucket, uploadFile, deleteFile } from "./storage/minio.js";
+import multer from "multer";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -21,11 +23,27 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
+// Multer 설정 (메모리 스토리지)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB 제한
+  },
+});
+
 const PORT = parseInt(process.env.PORT || "3001", 10);
 const GATEWAY_PORT = parseInt(process.env.GATEWAY_PORT || "3002", 10);
 
 // Database 초기화
 await setupSchema();
+
+// MinIO 초기화
+try {
+  await initBucket();
+} catch (error) {
+  console.error("[Server] Failed to initialize MinIO:", error);
+  console.warn("[Server] File upload functionality may not work properly");
+}
 
 // Gateway 초기화
 const gateway = new RealtimeGateway(GATEWAY_PORT);
@@ -59,7 +77,7 @@ app.post("/api/messages/notify", async (req, res) => {
   });
   
   try {
-    const { recordUri, senderDid, roomId, ciphertext, nonce, createdAt } = req.body;
+    const { recordUri, senderDid, roomId, ciphertext, nonce, createdAt, files, fileUrl, fileName, mimeType } = req.body;
     
     if (!recordUri || !senderDid || !roomId || !ciphertext || !nonce) {
       console.error("[API] ✗ Missing required fields");
@@ -76,7 +94,11 @@ app.post("/api/messages/notify", async (req, res) => {
       roomId,
       ciphertext,
       nonce,
-      createdAt || new Date().toISOString()
+      createdAt || new Date().toISOString(),
+      files,
+      fileUrl,
+      fileName,
+      mimeType
     );
     console.log("[API] ✓ indexer.notifyMessageImmediately completed");
 
@@ -659,6 +681,167 @@ app.delete("/api/friends", async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error("Failed to remove friend:", error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// 프로필 조회 API
+app.get("/api/profile/:did", async (req, res) => {
+  const { did } = req.params;
+  const db = getDB();
+
+  try {
+    const result = await db.query(
+      "SELECT did, display_name, description, avatar_url, updated_at FROM user_profiles WHERE did = $1",
+      [did]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ success: true, profile: null });
+    }
+
+    res.json({
+      success: true,
+      profile: {
+        did: result.rows[0].did,
+        displayName: result.rows[0].display_name,
+        description: result.rows[0].description,
+        avatarUrl: result.rows[0].avatar_url,
+        updatedAt: result.rows[0].updated_at,
+      },
+    });
+  } catch (error) {
+    console.error("Failed to get profile:", error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// 프로필 업데이트 API
+app.post("/api/profile/update", upload.single("avatar"), async (req, res) => {
+  const db = getDB();
+
+  try {
+    // FormData에서 데이터 추출
+    const did = req.body.did;
+    const displayName = req.body.displayName;
+    const description = req.body.description;
+    let avatarUrl = req.body.avatarUrl || null;
+
+    if (!did) {
+      return res.status(400).json({ success: false, error: "did is required" });
+    }
+
+    // 프로필 이미지가 업로드된 경우
+    if (req.file) {
+      try {
+        const { buffer, originalname, mimetype } = req.file;
+        const { fileUrl } = await uploadFile(buffer, originalname, mimetype || "image/jpeg");
+        avatarUrl = fileUrl;
+      } catch (error) {
+        console.error("Failed to upload avatar:", error);
+        return res.status(500).json({ success: false, error: "Failed to upload avatar" });
+      }
+    }
+
+    // 기존 프로필 확인
+    const existing = await db.query("SELECT id FROM user_profiles WHERE did = $1", [did]);
+
+    if (existing.rows.length === 0) {
+      // 새 프로필 생성
+      await db.query(
+        `INSERT INTO user_profiles (did, display_name, description, avatar_url, updated_at)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        [did, displayName || null, description || null, avatarUrl]
+      );
+    } else {
+      // 기존 프로필 업데이트
+      await db.query(
+        `UPDATE user_profiles 
+         SET display_name = $1, description = $2, avatar_url = $3, updated_at = NOW()
+         WHERE did = $4`,
+        [displayName || null, description || null, avatarUrl, did]
+      );
+    }
+
+    const updatedProfile = {
+      did,
+      displayName: displayName || null,
+      description: description || null,
+      avatarUrl: avatarUrl,
+    };
+
+    // 친구들에게 프로필 업데이트 알림 전송
+    try {
+      // 업데이트한 사용자의 친구 목록 가져오기
+      const friendsResult = await db.query(
+        `SELECT did1, did2 FROM friends WHERE did1 = $1 OR did2 = $1`,
+        [did]
+      );
+
+      // 친구들에게 알림 전송
+      for (const friendRow of friendsResult.rows) {
+        const friendDid = friendRow.did1 === did ? friendRow.did2 : friendRow.did1;
+        
+        gateway.pushNotificationToDid(friendDid, {
+          type: "profile_updated",
+          updatedDid: did,
+          profileData: {
+            displayName: displayName || null,
+            description: description || null,
+            avatarUrl: avatarUrl,
+          },
+        });
+      }
+    } catch (notifyError) {
+      console.warn("Failed to notify friends about profile update:", notifyError);
+      // 알림 실패해도 프로필 업데이트는 성공한 것으로 처리
+    }
+
+    res.json({
+      success: true,
+      profile: updatedProfile,
+    });
+  } catch (error) {
+    console.error("Failed to update profile:", error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// 파일 업로드
+app.post("/api/files/upload", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: "No file provided" });
+    }
+
+    const { fileUrl, fileName } = await uploadFile(
+      req.file.buffer,
+      req.file.originalname,
+      req.file.mimetype
+    );
+
+    res.json({
+      success: true,
+      fileUrl,
+      fileName,
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      size: req.file.size,
+    });
+  } catch (error) {
+    console.error("Failed to upload file:", error);
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// 파일 삭제
+app.delete("/api/files/:fileName", async (req, res) => {
+  try {
+    const { fileName } = req.params;
+    await deleteFile(fileName);
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to delete file:", error);
     res.status(500).json({ success: false, error: (error as Error).message });
   }
 });

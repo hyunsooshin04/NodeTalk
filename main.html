@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>MZ Vibe Chat Main Hub</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#d125f4",
+                        "accent-green": "#ccff00", // Acid Green
+                        "accent-blue": "#00f0ff", // Cyber Blue
+                        "background-light": "#f8f5f8",
+                        "background-dark": "#1f1022",
+                        "glass-dark": "rgba(20, 10, 30, 0.6)",
+                        "glass-light": "rgba(255, 255, 255, 0.1)",
+                    },
+                    fontFamily: {
+                        "display": ["Spline Sans", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "1rem", "lg": "2rem", "xl": "3rem", "full": "9999px"},
+                    boxShadow: {
+                        "neon": "0 0 10px rgba(209, 37, 244, 0.5), 0 0 20px rgba(209, 37, 244, 0.3)",
+                        "neon-green": "0 0 10px rgba(204, 255, 0, 0.5)",
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        /* Custom scrollbar for webkit */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(209, 37, 244, 0.3);
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(209, 37, 244, 0.6);
+        }
+        
+        .glass-panel {
+            background: rgba(31, 16, 34, 0.4);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .text-glow {
+            text-shadow: 0 0 15px rgba(209, 37, 244, 0.5);
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-slate-800 dark:text-white font-display overflow-hidden h-screen flex relative selection:bg-accent-green selection:text-black">
+<!-- Ambient Background Gradients -->
+<div class="fixed inset-0 pointer-events-none z-0">
+<div class="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 rounded-full blur-[120px]"></div>
+<div class="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-accent-blue/10 rounded-full blur-[120px]"></div>
+<div class="absolute top-[40%] left-[30%] w-[30%] h-[30%] bg-accent-green/5 rounded-full blur-[100px]"></div>
+</div>
+<!-- Main Layout Container -->
+<div class="relative z-10 flex w-full h-full p-4 gap-4">
+<!-- 1. Vibe Sidebar (Navigation) -->
+<aside class="w-20 glass-panel rounded-lg flex flex-col items-center py-6 gap-8 shadow-2xl shrink-0">
+<!-- App Logo/Icon -->
+<div class="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-accent-blue flex items-center justify-center shadow-neon cursor-pointer group">
+<span class="material-icons-round text-white text-2xl group-hover:animate-pulse">bolt</span>
+</div>
+<!-- Nav Items -->
+<nav class="flex flex-col gap-6 w-full px-2">
+<button class="w-12 h-12 mx-auto rounded-xl bg-primary/20 text-primary flex items-center justify-center relative group transition-all duration-300 hover:bg-primary hover:text-white hover:shadow-neon">
+<span class="material-icons-round text-2xl">chat_bubble</span>
+<span class="absolute right-0 top-0 w-3 h-3 bg-accent-green rounded-full border-2 border-[#1f1022]"></span>
+</button>
+<button class="w-12 h-12 mx-auto rounded-xl text-slate-400 hover:bg-white/10 hover:text-white flex items-center justify-center transition-all duration-300">
+<span class="material-icons-round text-2xl">groups</span>
+</button>
+<button class="w-12 h-12 mx-auto rounded-xl text-slate-400 hover:bg-white/10 hover:text-white flex items-center justify-center transition-all duration-300">
+<span class="material-icons-round text-2xl">explore</span>
+</button>
+<button class="w-12 h-12 mx-auto rounded-xl text-slate-400 hover:bg-white/10 hover:text-white flex items-center justify-center transition-all duration-300">
+<span class="material-icons-round text-2xl">videocam</span>
+</button>
+</nav>
+<div class="mt-auto flex flex-col gap-6 w-full px-2">
+<button class="w-12 h-12 mx-auto rounded-xl text-slate-400 hover:bg-white/10 hover:text-white flex items-center justify-center transition-all duration-300">
+<span class="material-icons-round text-2xl">settings</span>
+</button>
+<!-- User Avatar -->
+<div class="w-12 h-12 mx-auto rounded-full p-[2px] bg-gradient-to-tr from-accent-green to-primary cursor-pointer hover:scale-105 transition-transform">
+<img alt="User profile picture of a young woman with neon lighting" class="w-full h-full rounded-full object-cover border-2 border-[#1f1022]" data-alt="Close up profile picture of a young woman with stylish neon lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBJUpbvzy7AOdJ9KZG4hbEKT8DaOxFgQPxgLWLqQT7biVYrMzuxUEwxwgN7vP1AzqFDil1G0FFiGR6FVwmqttf5sIxXx0_beh0ZXvVWiUFKds4WLAyVI2CG3MER1B-bMs6_H8V-QEklC2Xql2TpBykWsCUNKfPir58ndryDa4IXcrdXpNT27P4J7WlV3jvmMdAvih5eZrpOQkAFttdJsFF2UIuFAvF5nJZhnJl8bRtFczuDYGs5_KAAoZQuDzhsIybovcFOVX3nV_c"/>
+</div>
+</div>
+</aside>
+<!-- 2. Active Chats List -->
+<section class="w-80 glass-panel rounded-lg flex flex-col shrink-0 overflow-hidden">
+<!-- Search Header -->
+<div class="p-6 pb-2">
+<h2 class="text-2xl font-bold tracking-wide mb-4 text-white">CHATS <span class="text-primary">.</span></h2>
+<div class="relative group">
+<span class="material-icons-round absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors">search</span>
+<input class="w-full bg-black/20 border border-white/10 rounded-full py-3 pl-10 pr-4 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary transition-all" placeholder="Search vibes..." type="text"/>
+</div>
+</div>
+<!-- Story/Status Row -->
+<div class="px-6 py-4 flex gap-4 overflow-x-auto no-scrollbar scroll-smooth snap-x">
+<div class="flex flex-col items-center gap-1 min-w-[60px] cursor-pointer group snap-start">
+<div class="w-14 h-14 rounded-full border-2 border-dashed border-slate-500 flex items-center justify-center bg-white/5 group-hover:border-primary transition-colors">
+<span class="material-icons-round text-2xl text-slate-400 group-hover:text-primary">add</span>
+</div>
+<span class="text-[10px] uppercase font-bold tracking-wider text-slate-400">My Vibe</span>
+</div>
+<!-- Status Item 1 -->
+<div class="flex flex-col items-center gap-1 min-w-[60px] cursor-pointer snap-start">
+<div class="w-14 h-14 rounded-full p-[2px] bg-gradient-to-tr from-accent-blue to-transparent">
+<img alt="Profile picture of a person with colorful hair" class="w-full h-full rounded-full object-cover border-2 border-[#1f1022]" data-alt="Stylish portrait of a person with short pink hair looking sideways" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAMc82XiDCinYZkMfSekFM53DjaBo3WI1k_rSaCiQzC8LS_5OuX0mcfx2-hNLAzeA98MvlodskiI9ehKvRw7UYM7RO6cY0EGHvo3_gqNbivNsLLQSfz_4y3jECTgXGHg4V2VN5J01uOEKyXFZaC3uqGOTGaTOFqtgCcnGgK6w-u17lConHBVlZDyGK7oZ6TlG-lY4nqdENBGvRU4vDxpLwhiet56lvKe8YpI5XZKBMsLPXOmbwqhn6_YOPNSQSgdVeQgRLqjQGSAX0"/>
+</div>
+<span class="text-[10px] font-medium text-slate-300">Kai</span>
+</div>
+<!-- Status Item 2 -->
+<div class="flex flex-col items-center gap-1 min-w-[60px] cursor-pointer snap-start">
+<div class="w-14 h-14 rounded-full p-[2px] bg-gradient-to-tr from-accent-green to-primary">
+<img alt="Profile picture of a smiling woman" class="w-full h-full rounded-full object-cover border-2 border-[#1f1022]" data-alt="Portrait of a smiling young woman with long hair in a casual setting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBPuiBpHKQgBNAnh_ooNqnL6_7fOJRphwNjIuHKc2vezyJgFvtHq8hanlX1Km14058-eIgqaIdjId8TekEvMnmYpAPlX5MLOwXKpCy7lk6ggL56qFtuEJs0dkVgp1PvelU3Qyx9vfD2YTYevzOepvxL0wtEap3fen_WmI-oFgYr3r5JzYDTo1-2jBrO4Uq5EcB6LBNHK2O3zuWWaHMMnzdUCfQqoIKtXT0QHejhTAWxcMMAshRcUIgNuqLtgGThA0WFAYMqY4PQJlk"/>
+</div>
+<span class="text-[10px] font-medium text-slate-300">Elena</span>
+</div>
+<!-- Status Item 3 -->
+<div class="flex flex-col items-center gap-1 min-w-[60px] cursor-pointer snap-start">
+<div class="w-14 h-14 rounded-full p-[2px] bg-slate-700">
+<img alt="Profile picture of a man looking serious" class="w-full h-full rounded-full object-cover border-2 border-[#1f1022]" data-alt="Portrait of a young man with a focused expression looking at the camera" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDM9fyiaTTebqtsNmqP7P9uGAt9z6PYkb5VvB3WtsQL4RE4UgfIL1dEDWnmrg58HNl8R57mDMFQP3cQfawExP0NrriH5gFecVPVtj9CnzEaSVb77UsQjB73RYfLq-xuVWfDPwwp5MnL9oFiJFZVcJbCwxxmhHcvPu0UAY2hfn_JWnIhGUPDTCZ3XiL5nYuzJ2lDeGe5oF5JNg2BflH1GuEn2nhCnsWDQJESI3xnnTQTwZcMU7KEum-QO1Emtj-vBK6FzoRz7Zm0L9o"/>
+</div>
+<span class="text-[10px] font-medium text-slate-300">Marcus</span>
+</div>
+</div>
+<!-- Chat List -->
+<div class="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
+<!-- Active Chat Item -->
+<div class="p-3 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors cursor-pointer group flex gap-3 items-center relative overflow-hidden">
+<div class="absolute inset-0 bg-gradient-to-r from-primary/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+<div class="relative">
+<img alt="Group chat icon showing diverse people" class="w-12 h-12 rounded-full object-cover" data-alt="Group of friends laughing and talking together at an outdoor gathering" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC-kY7v44VC1jXLC1K-POX7ncF_ursdPezAJfeBjnq_TFZKborhn_m-ktRjeL1K4dnx0kaPrKWTvutmZ9kZ930zQD-mrQmO5F12E2v-_uSYpVte_C6Gi-I0edki5D1aLfzhtad0OsAeZsP2LzIsYv4Iu_Iu7K7kKWd1Xg3k7ubhV6xJP4LocfbR4RI2RO-Kz9_ZEzz5ndN0EHNPFcSrUxRK4zuXxYq6eAaXUMhS86XODwmw3EdbVEM-TvYkD8xYYmx4wZ93aou3sVk"/>
+<div class="absolute bottom-0 right-0 w-3 h-3 bg-accent-green border-2 border-[#1f1022] rounded-full"></div>
+</div>
+<div class="flex-1 min-w-0 relative z-10">
+<div class="flex justify-between items-baseline mb-1">
+<h3 class="font-bold text-white truncate">Rooftop Party Crew ⚡️</h3>
+<span class="text-[10px] text-primary font-bold">2m</span>
+</div>
+<p class="text-sm text-slate-300 truncate">Duh. Already queued up.</p>
+</div>
+</div>
+<!-- Inactive Chat Item -->
+<div class="p-3 rounded-2xl hover:bg-white/5 transition-colors cursor-pointer flex gap-3 items-center">
+<div class="relative">
+<img alt="Profile of a bearded man" class="w-12 h-12 rounded-full object-cover grayscale opacity-70" data-alt="Headshot of a man with glasses and a beard looking professional" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB4Yi2LFO8OVgDoAn5Or2P5owzG4yqi-KZMADK_bSLjbZLsG1YfJXzi4roH51n18HQVmGjPPTK0II8iyNiLkP1iKg-T66YzDwdz1O1BpYsfcdWpl-wgOFUz6Es96iK5UKaJNskkP3cX0DI2PLoK2FXHm9mc7clOZd1CEwa9W5wqqNulV9troipjA741PoqyapZPChrWsafxJL8BkayBh3AmKAicnsdJOIseDP_LVfGG439TrRt-foUd8zGrJkY5mrX1SEG4qce50UY"/>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-1">
+<h3 class="font-semibold text-slate-200 truncate">Design Team</h3>
+<span class="text-[10px] text-slate-500">1h</span>
+</div>
+<p class="text-sm text-slate-500 truncate">Sent the figma link!</p>
+</div>
+</div>
+<!-- Another Item -->
+<div class="p-3 rounded-2xl hover:bg-white/5 transition-colors cursor-pointer flex gap-3 items-center">
+<div class="relative">
+<img alt="Profile of a woman with sunglasses" class="w-12 h-12 rounded-full object-cover" data-alt="Woman wearing stylish sunglasses and a hat posing outdoors" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDduHYzNmirCQAwb5LNHK2x_aoehr2Z4tdha3N-2v9HGMrHGpF2W86Ye-rJ2xTHw6YtlJ57vxvta_1ft3zOK4p_OaTppoyZs-PE6WWtifaVIynWmt-LJNARQVYwwvaXgu9WN-vY9Mg7twqiUzStQjwgEyPpKLIqSc79zzzJTrNxuXb8s3AEUlpmyH1oeewVBKU1o7NsN1jbfpkHgEjH1k21CbdB3xzgakqIn525onfVluQ8Sin8NRcjwKAdTGg7wEI0wbe42GlmCsY"/>
+<div class="absolute bottom-0 right-0 w-3 h-3 bg-slate-500 border-2 border-[#1f1022] rounded-full"></div>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-1">
+<h3 class="font-semibold text-slate-200 truncate">Sarah J.</h3>
+<span class="text-[10px] text-slate-500">3h</span>
+</div>
+<p class="text-sm text-slate-500 truncate">See you tomorrow?</p>
+</div>
+</div>
+<!-- Another Item -->
+<div class="p-3 rounded-2xl hover:bg-white/5 transition-colors cursor-pointer flex gap-3 items-center">
+<div class="relative">
+<div class="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg">G</div>
+</div>
+<div class="flex-1 min-w-0">
+<div class="flex justify-between items-baseline mb-1">
+<h3 class="font-semibold text-slate-200 truncate">Gaming Squad</h3>
+<span class="text-[10px] text-slate-500">5h</span>
+</div>
+<p class="text-sm text-slate-500 truncate"><span class="text-accent-blue">@Kai</span> is live now!</p>
+</div>
+</div>
+</div>
+</section>
+<!-- 3. Main Stage (Chat Window) -->
+<main class="flex-1 glass-panel rounded-lg flex flex-col relative overflow-hidden shadow-2xl">
+<!-- Header HUD -->
+<header class="h-20 border-b border-white/5 px-6 flex items-center justify-between shrink-0 bg-white/[0.02]">
+<div class="flex items-center gap-4">
+<div class="relative">
+<img alt="Active chat avatar" class="w-10 h-10 rounded-full object-cover ring-2 ring-primary ring-offset-2 ring-offset-[#1f1022]" data-alt="Group of friends laughing and talking together at an outdoor gathering" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCb0_HkTcYWSjFnM5sQM4lTpVbLYySmKo_ETITQgPMUiOSK3OmR_7n6OLytJNIh6IpatVaeesn8W5Zy0pdZ2kcYMdxRsr46QPQZbVpbrIa9iwoFC1SH1eElS3T2IsO3-NOswK3PCD9nD5zWk5uCr1Fzi9m6pHMg1f_tyY4OkXXwifi-Xwvlwi4L_gT2v6MWhQ9aW4HPpXq1zyi3lm4eT1eaE4mMFRrAGn43DOswkIOEIikcd_1XHu3lxD1mWpcQZBA4lK0rRteI2c4"/>
+<span class="absolute -bottom-1 -right-1 flex h-3 w-3">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-75"></span>
+<span class="relative inline-flex rounded-full h-3 w-3 bg-accent-green"></span>
+</span>
+</div>
+<div>
+<h1 class="text-lg font-bold text-white tracking-wide flex items-center gap-2">
+                            ROOFTOP PARTY CREW ⚡️
+                            <span class="px-2 py-0.5 rounded-full bg-white/10 text-[10px] font-normal text-slate-300">Public</span>
+</h1>
+<p class="text-xs text-slate-400 font-mono">34 Online • Vibe Check: <span class="text-accent-green">Hyped</span></p>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="w-10 h-10 rounded-full hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-colors">
+<span class="material-icons-round">search</span>
+</button>
+<button class="w-10 h-10 rounded-full hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-colors">
+<span class="material-icons-round">phone</span>
+</button>
+<button class="w-10 h-10 rounded-full hover:bg-white/10 flex items-center justify-center text-slate-400 hover:text-white transition-colors border-l border-white/10 ml-2 pl-2">
+<span class="material-icons-round">more_vert</span>
+</button>
+</div>
+</header>
+<!-- Chat Area -->
+<div class="flex-1 overflow-y-auto p-6 space-y-6 flex flex-col relative">
+<!-- Watermark Logo -->
+<div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-[0.03]">
+<span class="material-icons-round text-[300px] text-white">bolt</span>
+</div>
+<!-- Date Divider -->
+<div class="flex justify-center">
+<span class="px-4 py-1 rounded-full bg-black/20 text-xs text-slate-500 font-mono border border-white/5">Today</span>
+</div>
+<!-- Message: Other -->
+<div class="flex gap-4 items-end max-w-[80%] z-10">
+<img alt="Kai avatar" class="w-8 h-8 rounded-full object-cover mb-1" data-alt="Stylish portrait of a person with short pink hair looking sideways" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCTwDaCKWPRszfIyvskcTMSjSkqG988rh-W2F2cT4bknOC8VcfQkus3z-gfloXkvZ2VAXtvic-LGbg5l4H7DVYsMXpfwSD0ONs0MAwt7NY23V0kq1yN8UcSwfD5aAMT-MxUBR8kY-mfAefryiUdagHx9GgNtC2Qr1E1tOiNCeDRBg8GSfsh0Huv02tYDhgFv2JeCN9P9tAARFsrX6kchMFl2iiE3xgsBWlBPDDdgIBQMOLL98S85ShuS3xBwxDoNynlALJwZHXDnsI"/>
+<div class="flex flex-col gap-1">
+<div class="flex items-baseline gap-2 ml-1">
+<span class="text-xs font-bold text-accent-blue">Kai</span>
+<span class="text-[10px] text-slate-500">10:42 PM</span>
+</div>
+<div class="p-4 rounded-2xl rounded-bl-none bg-white/10 backdrop-blur-md border border-white/5 text-slate-100 shadow-lg">
+<p>Yo! Are we going to that pop-up store tonight?</p>
+</div>
+</div>
+</div>
+<!-- Message: System -->
+<div class="flex justify-center items-center gap-2 my-2 z-10">
+<span class="h-[1px] w-12 bg-gradient-to-r from-transparent to-primary/50"></span>
+<span class="text-xs text-primary font-mono tracking-wider">🔥 J-Min just joined the Vibe</span>
+<span class="h-[1px] w-12 bg-gradient-to-l from-transparent to-primary/50"></span>
+</div>
+<!-- Message: Other (Stacked) -->
+<div class="flex gap-4 items-end max-w-[80%] z-10">
+<img alt="Elena avatar" class="w-8 h-8 rounded-full object-cover mb-1" data-alt="Portrait of a smiling young woman with long hair in a casual setting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDv8h0AwGVboFX_d7hXd5ffO5y32Nohmfkkj5UZQR3u0HIH3wPPH9bWGKPQ0Tpz8TXJnAhBoLauF_GDqy5US6XA-l7il2GHZSw8lMm2L5ku1QXVUqwqhx680gwwFSw_L0rHU_VvVCoyDOMFkuYG5yrBC69uH_RksgjDkgQlO0hOc1t4CMn5xKDlB7EiArbCUzTJZqRLClaRLmnaXnvhEKU1d5CKgNCZZbeLXXFNf7gML_XelLukNky0saitmN3tBOPPFVyAr8LhT_4"/>
+<div class="flex flex-col gap-1">
+<div class="flex items-baseline gap-2 ml-1">
+<span class="text-xs font-bold text-accent-green">Elena</span>
+<span class="text-[10px] text-slate-500">10:44 PM</span>
+</div>
+<div class="p-4 rounded-2xl rounded-bl-none bg-white/10 backdrop-blur-md border border-white/5 text-slate-100 shadow-lg">
+<p>I heard they have limited edition merch 👀</p>
+</div>
+<!-- Sticker -->
+<div class="w-32 mt-1 transform hover:scale-105 transition-transform duration-300">
+<div class="aspect-square bg-gradient-to-br from-yellow-400 to-orange-500 rounded-xl flex items-center justify-center shadow-lg border-2 border-white/20">
+<span class="text-6xl filter drop-shadow-md">😎</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Message: Self -->
+<div class="flex gap-4 items-end max-w-[80%] self-end flex-row-reverse z-10">
+<img alt="My avatar" class="w-8 h-8 rounded-full object-cover mb-1" data-alt="Close up profile picture of a young woman with stylish neon lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA1KaSwtbKDLmC4PhRzMDzeUXZdg3lIvnFHlyWeN55RSLo0DnHWFasv1bAkhrmNP_cd0vInlnejh06AnO8f0RlWRGKro1PLAwctlvHCdr1HoSQpKycfCngXmNIdeJhNuCjxVL5dxiZHEsY--4lUvbjfped9-W7sfrFSWX2PsBvTe0JEmAYC729lTPyswVn8Zsa1bCqt1X2qDRQmpdtd5WaxdEQSZ2OYyXdNKhCRUpIwYCdUpVaiFdY0outhlG3GbanXatvU-5ZHpjQ"/>
+<div class="flex flex-col gap-1 items-end">
+<div class="flex items-baseline gap-2 mr-1">
+<span class="text-[10px] text-slate-500">10:45 PM</span>
+<span class="text-xs font-bold text-primary">Me</span>
+</div>
+<div class="p-4 rounded-2xl rounded-br-none bg-primary text-white shadow-neon border border-white/10">
+<p class="font-medium">Duh. Already queued up.</p>
+</div>
+<div class="flex gap-1 mt-1 mr-1">
+<span class="text-[10px] bg-white/10 px-1.5 py-0.5 rounded-md text-white/80">👍 2</span>
+<span class="text-[10px] bg-white/10 px-1.5 py-0.5 rounded-md text-white/80">🔥 4</span>
+</div>
+</div>
+</div>
+<!-- Typing Indicator -->
+<div class="flex gap-4 items-end z-10">
+<div class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
+<span class="material-icons-round text-slate-500 text-sm">more_horiz</span>
+</div>
+<div class="px-4 py-3 rounded-2xl rounded-bl-none bg-white/5 border border-white/5 flex items-center gap-1 h-10">
+<div class="w-2 h-2 bg-slate-500 rounded-full animate-bounce"></div>
+<div class="w-2 h-2 bg-slate-500 rounded-full animate-bounce delay-75"></div>
+<div class="w-2 h-2 bg-slate-500 rounded-full animate-bounce delay-150"></div>
+</div>
+</div>
+</div>
+<!-- Input Area -->
+<div class="p-6 pt-2 shrink-0 relative z-20">
+<!-- Reaction Deck -->
+<div class="absolute -top-12 left-6 flex gap-2">
+<button class="bg-black/40 hover:bg-primary/80 backdrop-blur-md border border-white/10 rounded-full p-2 text-xl hover:scale-110 transition-all shadow-lg">🔥</button>
+<button class="bg-black/40 hover:bg-primary/80 backdrop-blur-md border border-white/10 rounded-full p-2 text-xl hover:scale-110 transition-all shadow-lg">💀</button>
+<button class="bg-black/40 hover:bg-primary/80 backdrop-blur-md border border-white/10 rounded-full p-2 text-xl hover:scale-110 transition-all shadow-lg">🫠</button>
+<button class="bg-black/40 hover:bg-primary/80 backdrop-blur-md border border-white/10 rounded-full px-3 py-1 text-xs font-bold text-white uppercase tracking-wider hover:scale-105 transition-all shadow-lg flex items-center gap-1">
+<span class="material-icons-round text-sm text-accent-green">stars</span> Stickers
+                    </button>
+</div>
+<div class="bg-white/5 border border-white/10 rounded-full p-2 pl-4 flex items-center gap-2 shadow-lg focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary transition-all">
+<button class="w-8 h-8 rounded-full bg-white/10 hover:bg-primary text-slate-300 hover:text-white flex items-center justify-center transition-colors">
+<span class="material-icons-round text-lg">add</span>
+</button>
+<input class="bg-transparent border-none text-white placeholder-slate-500 focus:ring-0 flex-1 h-10 px-2 font-medium" placeholder="Spill the tea..." type="text"/>
+<button class="p-2 rounded-full hover:bg-white/10 text-slate-400 hover:text-accent-blue transition-colors">
+<span class="material-icons-round">gif</span>
+</button>
+<button class="p-2 rounded-full hover:bg-white/10 text-slate-400 hover:text-accent-green transition-colors">
+<span class="material-icons-round">mic</span>
+</button>
+<button class="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center shadow-neon hover:scale-105 hover:bg-white hover:text-primary transition-all">
+<span class="material-icons-round -rotate-45 ml-1">send</span>
+</button>
+</div>
+<div class="text-center mt-2">
+<span class="text-[10px] text-slate-600 font-mono">Press ⏎ to send • Shift + ⏎ for new line</span>
+</div>
+</div>
+</main>
+<!-- Right Side Panel (Optional/Context) - Hidden on smaller screens or could be a collapsible panel -->
+<!-- For this layout, keeping it focused 3-column: Nav - List - Chat is cleaner -->
+</div>
+</body></html>

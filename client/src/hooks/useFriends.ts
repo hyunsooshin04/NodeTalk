@@ -34,12 +34,29 @@ export function useFriends(pds: ClientPDSAdapter | null) {
             })
             .map(async ({ friendDid, serverFriend }) => {
               try {
+                // 서버에서 프로필 정보 가져오기
+                const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+                let serverProfile = null;
+                try {
+                  const profileResponse = await fetch(`${API_URL}/api/profile/${encodeURIComponent(friendDid)}`);
+                  if (profileResponse.ok) {
+                    const profileData = await profileResponse.json();
+                    if (profileData.success && profileData.profile) {
+                      serverProfile = profileData.profile;
+                    }
+                  }
+                } catch (error) {
+                  console.warn("Failed to load profile from server:", error);
+                }
+
+                // PDS에서 프로필 정보 가져오기
                 const profile = await adapter.getProfile(friendDid);
                 return {
                   did: profile.did,
                   handle: profile.handle,
-                  displayName: profile.displayName,
+                  displayName: serverProfile?.displayName || profile.displayName,
                   avatar: profile.avatar,
+                  avatarUrl: serverProfile?.avatarUrl || profile.avatar || null,
                   addedAt: serverFriend.created_at || new Date().toISOString(),
                 } as Friend;
               } catch (error) {

@@ -82,7 +82,8 @@ export class ClientPDSAdapter {
   async sendMessage(
     roomId: string,
     ciphertext: string,
-    nonce: string
+    nonce: string,
+    files?: Array<{ fileUrl: string; fileName: string; mimeType: string }>
   ): Promise<string> {
     if (!this.agent) {
       throw new Error("Not logged in");
@@ -94,6 +95,13 @@ export class ClientPDSAdapter {
       ciphertext,
       nonce,
       createdAt: new Date().toISOString(),
+      ...(files && files.length > 0 && { files }),
+      // 하위 호환성: 단일 파일인 경우 fileUrl도 포함
+      ...(files && files.length === 1 && {
+        fileUrl: files[0].fileUrl,
+        fileName: files[0].fileName,
+        mimeType: files[0].mimeType,
+      }),
     };
 
     const result = await this.agent.com.atproto.repo.createRecord({
@@ -236,7 +244,7 @@ export class ClientPDSAdapter {
           })
           .map((r) => {
             const record = r.value as any;
-            return {
+            const messageData: any = {
               uri: r.uri,
               senderDid: memberDid,
               createdAt: record.createdAt || new Date().toISOString(),
@@ -245,6 +253,19 @@ export class ClientPDSAdapter {
               nonce: String(record.nonce || ""),
               $type: record.$type,
             };
+            
+            // 여러 파일 지원
+            if (record.files && Array.isArray(record.files) && record.files.length > 0) {
+              messageData.files = record.files;
+              console.log(`[PDS] Found ${record.files.length} files in message ${r.uri}:`, record.files);
+            } else if (record.fileUrl) {
+              // 하위 호환성: 단일 파일
+              messageData.fileUrl = record.fileUrl;
+              messageData.fileName = record.fileName;
+              messageData.mimeType = record.mimeType;
+            }
+            
+            return messageData;
           })
           .filter((msg) => msg.ciphertext && msg.nonce); // 필수 필드가 있는 메시지만
         

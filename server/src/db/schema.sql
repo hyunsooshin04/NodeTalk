@@ -75,3 +75,16 @@ CREATE TABLE IF NOT EXISTS room_keys (
 );
 
 CREATE INDEX IF NOT EXISTS idx_room_keys_room_id ON room_keys(room_id);
+
+-- 사용자 프로필 정보
+CREATE TABLE IF NOT EXISTS user_profiles (
+  id SERIAL PRIMARY KEY,
+  did TEXT NOT NULL UNIQUE,
+  display_name TEXT,
+  description TEXT,
+  avatar_url TEXT,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_profiles_did ON user_profiles(did);

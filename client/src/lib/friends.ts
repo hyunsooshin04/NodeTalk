@@ -7,6 +7,7 @@ export interface Friend {
   handle?: string;
   displayName?: string;
   avatar?: string;
+  avatarUrl?: string; // 서버에서 가져온 프로필 이미지 URL
   addedAt: string;
 }
 

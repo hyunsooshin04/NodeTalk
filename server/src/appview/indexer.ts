@@ -14,6 +14,8 @@ export class AppViewIndexer {
   private agents: Map<string, BskyAgentType> = new Map();
   private gateway: RealtimeGateway | null = null;
   private pollingIntervals: Map<string, NodeJS.Timeout> = new Map();
+  private errorCounts: Map<string, number> = new Map(); // DID별 연속 에러 카운트
+  private lastErrorLogs: Map<string, number> = new Map(); // 마지막 에러 로그 시간 (스팸 방지)
 
   /**
    * Gateway 연결 설정
@@ -94,6 +96,9 @@ export class AppViewIndexer {
           limit: 100,
         });
 
+        // 성공적으로 조회했으면 에러 카운트 리셋
+        this.errorCounts.set(did, 0);
+
         // 새 메시지가 있는지 확인 (시간 기반)
         let foundNew = false;
         for (const record of result.data.records) {
@@ -116,8 +121,45 @@ export class AppViewIndexer {
         }
       } catch (error: any) {
         // 인증 오류는 무시
-        if (!error.message?.includes("Authentication") && !error.message?.includes("401")) {
-          console.error(`[AppView] Error polling PDS for ${did}:`, error);
+        if (error.message?.includes("Authentication") || error.message?.includes("401")) {
+          return;
+        }
+
+        // 에러 카운트 증가
+        const errorCount = (this.errorCounts.get(did) || 0) + 1;
+        this.errorCounts.set(did, errorCount);
+
+        // 네트워크 에러인지 확인
+        const isNetworkError = 
+          error.message?.includes("fetch failed") ||
+          error.message?.includes("ECONNREFUSED") ||
+          error.message?.includes("ETIMEDOUT") ||
+          error.message?.includes("ENOTFOUND") ||
+          error.error === "TypeError: fetch failed";
+
+        // 에러 로그 스팸 방지: 같은 에러를 30초마다만 로그
+        const now = Date.now();
+        const lastLogTime = this.lastErrorLogs.get(did) || 0;
+        const shouldLog = now - lastLogTime > 30000; // 30초
+
+        if (shouldLog) {
+          if (isNetworkError) {
+            console.warn(
+              `[AppView] Network error polling PDS for ${did} (error count: ${errorCount}). ` +
+              `This may be due to network issues or PDS being unavailable.`
+            );
+          } else {
+            console.error(`[AppView] Error polling PDS for ${did} (error count: ${errorCount}):`, error);
+          }
+          this.lastErrorLogs.set(did, now);
+        }
+
+        // 연속 에러가 너무 많으면 (100회 이상) 경고만 한 번 출력
+        if (errorCount === 100) {
+          console.warn(
+            `[AppView] Warning: ${errorCount} consecutive errors for ${did}. ` +
+            `PDS may be unavailable. Polling will continue but errors will be suppressed.`
+          );
         }
       }
     }, 2000); // 2초마다 체크 (더 빠른 반응)
@@ -134,7 +176,11 @@ export class AppViewIndexer {
     roomId: string,
     ciphertext: string,
     nonce: string,
-    createdAt: string
+    createdAt: string,
+    files?: Array<{ fileUrl: string; fileName: string; mimeType: string }>,
+    fileUrl?: string,
+    fileName?: string,
+    mimeType?: string
   ): Promise<void> {
     const db = getDB();
     
@@ -190,6 +236,9 @@ export class AppViewIndexer {
           ciphertext: ciphertext,
           nonce: nonce,
           createdAt: createdAt,
+          ...(files && files.length > 0 && { files }),
+          // 하위 호환성
+          ...(fileUrl && { fileUrl, fileName, mimeType }),
         },
       };
       

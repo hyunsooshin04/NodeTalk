@@ -21,7 +21,6 @@ interface SidebarProps {
   onCreateGroup: () => void;
   onCancelCreateGroup: () => void;
   // 친구 관련 props
-  showRequests: boolean;
   friendRequests: any[];
   sentRequests: any[];
   addFriendInput: string;
@@ -32,6 +31,9 @@ interface SidebarProps {
   onCancelFriendRequest: (requestId: number) => void;
   onStartChat: (friendDid: string) => void;
   onRemoveFriend: (friendDid: string) => void;
+  onShowProfile: () => void;
+  onSelectFriend: (friend: Friend) => void;
+  onSelectRequest?: (request: any) => void;
 }
 
 export default function Sidebar({
@@ -50,7 +52,6 @@ export default function Sidebar({
   onToggleFriendForGroup,
   onCreateGroup,
   onCancelCreateGroup,
-  showRequests,
   friendRequests,
   sentRequests,
   addFriendInput,
@@ -61,83 +62,192 @@ export default function Sidebar({
   onCancelFriendRequest,
   onStartChat,
   onRemoveFriend,
+  onShowProfile,
+  onSelectFriend,
+  onSelectRequest,
 }: SidebarProps) {
   return (
-    <div style={{ 
-      width: "320px", 
-      backgroundColor: "white",
-      borderRight: "1px solid #e1dfdd",
-      display: "flex",
-      flexDirection: "column",
-      overflow: "hidden"
-    }}>
-      {/* 탭 메뉴 */}
-      <div style={{ 
-        display: "flex", 
-        borderBottom: "1px solid #e1dfdd",
-        backgroundColor: "#faf9f8"
+    <>
+      {/* Vibe Sidebar (Navigation) */}
+      <aside style={{
+        width: "80px",
+        background: "rgba(31, 16, 34, 0.4)",
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
+        border: "1px solid rgba(255, 255, 255, 0.05)",
+        borderRadius: "1rem",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        padding: "1.5rem 0",
+        gap: "2rem",
+        flexShrink: 0,
+        boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)"
       }}>
-        <button
-          onClick={() => onViewChange("chat")}
-          style={{
-            flex: 1,
-            padding: "0.875rem 1rem",
-            backgroundColor: currentView === "chat" ? "white" : "transparent",
-            color: currentView === "chat" ? "#464EB8" : "#605e5c",
-            border: "none",
-            borderBottom: currentView === "chat" ? "2px solid #464EB8" : "2px solid transparent",
-            cursor: "pointer",
-            fontSize: "0.875rem",
-            fontWeight: currentView === "chat" ? 600 : 400,
-            transition: "all 0.2s"
-          }}
+        {/* App Logo/Icon */}
+        <div style={{
+          width: "48px",
+          height: "48px",
+          borderRadius: "50%",
+          background: "linear-gradient(to bottom right, #d125f4, #00f0ff)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          boxShadow: "0 0 10px rgba(209, 37, 244, 0.5), 0 0 20px rgba(209, 37, 244, 0.3)",
+          cursor: "pointer",
+          transition: "transform 0.2s"
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = "scale(1.05)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = "scale(1)";
+        }}
         >
-          채팅
-        </button>
-        <button
-          onClick={() => onViewChange("friends")}
-          style={{
-            flex: 1,
-            padding: "0.875rem 1rem",
-            backgroundColor: currentView === "friends" ? "white" : "transparent",
-            color: currentView === "friends" ? "#464EB8" : "#605e5c",
-            border: "none",
-            borderBottom: currentView === "friends" ? "2px solid #464EB8" : "2px solid transparent",
-            cursor: "pointer",
-            fontSize: "0.875rem",
-            fontWeight: currentView === "friends" ? 600 : 400,
-            position: "relative",
-            transition: "all 0.2s"
-          }}
-        >
-          친구
-          {friendRequestsCount > 0 && (
-            <span
-              style={{
-                position: "absolute",
-                top: "0.5rem",
-                right: "0.5rem",
-                backgroundColor: "#d13438",
-                color: "white",
-                borderRadius: "10px",
-                minWidth: "18px",
-                height: "18px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: "0.7rem",
-                fontWeight: "bold",
-                padding: "0 0.25rem",
-              }}
-            >
-              {friendRequestsCount}
-            </span>
-          )}
-        </button>
-      </div>
+          <span style={{ color: "white", fontSize: "1.5rem" }}>⚡</span>
+        </div>
 
-      {/* 사이드바 컨텐츠 */}
-      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        {/* Nav Items */}
+        <nav style={{ display: "flex", flexDirection: "column", gap: "1.5rem", width: "100%", padding: "0 0.5rem" }}>
+          <button
+            onClick={() => onViewChange("chat")}
+            style={{
+              width: "48px",
+              height: "48px",
+              margin: "0 auto",
+              borderRadius: "0.75rem",
+              background: currentView === "chat" ? "rgba(209, 37, 244, 0.2)" : "transparent",
+              color: currentView === "chat" ? "#d125f4" : "rgba(148, 163, 184, 1)",
+              border: "none",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              position: "relative",
+              cursor: "pointer",
+              transition: "all 0.3s",
+              boxShadow: currentView === "chat" ? "0 0 10px rgba(209, 37, 244, 0.5), 0 0 20px rgba(209, 37, 244, 0.3)" : "none"
+            }}
+            onMouseEnter={(e) => {
+              if (currentView !== "chat") {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
+                e.currentTarget.style.color = "white";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (currentView !== "chat") {
+                e.currentTarget.style.background = "transparent";
+                e.currentTarget.style.color = "rgba(148, 163, 184, 1)";
+              }
+            }}
+          >
+            <span style={{ fontSize: "1.5rem" }}>💬</span>
+            {currentView === "chat" && (
+              <span style={{
+                position: "absolute",
+                right: 0,
+                top: 0,
+                width: "12px",
+                height: "12px",
+                background: "#ccff00",
+                borderRadius: "50%",
+                border: "2px solid #1f1022"
+              }}></span>
+            )}
+          </button>
+
+          <button
+            onClick={() => onViewChange("friends")}
+            style={{
+              width: "48px",
+              height: "48px",
+              margin: "0 auto",
+              borderRadius: "0.75rem",
+              background: currentView === "friends" ? "rgba(209, 37, 244, 0.2)" : "transparent",
+              color: currentView === "friends" ? "#d125f4" : "rgba(148, 163, 184, 1)",
+              border: "none",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              position: "relative",
+              cursor: "pointer",
+              transition: "all 0.3s",
+              boxShadow: currentView === "friends" ? "0 0 10px rgba(209, 37, 244, 0.5), 0 0 20px rgba(209, 37, 244, 0.3)" : "none"
+            }}
+            onMouseEnter={(e) => {
+              if (currentView !== "friends") {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
+                e.currentTarget.style.color = "white";
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (currentView !== "friends") {
+                e.currentTarget.style.background = "transparent";
+                e.currentTarget.style.color = "rgba(148, 163, 184, 1)";
+              }
+            }}
+          >
+            <span style={{ fontSize: "1.5rem" }}>👥</span>
+            {friendRequestsCount > 0 && (
+              <span style={{
+                position: "absolute",
+                right: 0,
+                top: 0,
+                width: "12px",
+                height: "12px",
+                background: "#ccff00",
+                borderRadius: "50%",
+                border: "2px solid #1f1022"
+              }}></span>
+            )}
+          </button>
+        </nav>
+
+        {/* Bottom Section */}
+        <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "1.5rem", width: "100%", padding: "0 0.5rem" }}>
+          <button 
+            onClick={onShowProfile}
+            style={{
+              width: "48px",
+              height: "48px",
+              margin: "0 auto",
+              borderRadius: "0.75rem",
+              background: "transparent",
+              color: "rgba(148, 163, 184, 1)",
+              border: "none",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              transition: "all 0.3s"
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
+              e.currentTarget.style.color = "white";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = "rgba(148, 163, 184, 1)";
+            }}
+          >
+            <span style={{ fontSize: "1.5rem" }}>⚙️</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Active Chats List / Friends List */}
+      <section style={{
+        width: "320px",
+        background: "rgba(31, 16, 34, 0.4)",
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
+        border: "1px solid rgba(255, 255, 255, 0.05)",
+        borderRadius: "1rem",
+        display: "flex",
+        flexDirection: "column",
+        flexShrink: 0,
+        overflow: "hidden",
+        boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)"
+      }}>
         {currentView === "chat" && (
           <ChatList
             rooms={rooms}
@@ -158,7 +268,6 @@ export default function Sidebar({
         {currentView === "friends" && (
           <FriendsList
             friends={friends}
-            showRequests={showRequests}
             friendRequests={friendRequests}
             sentRequests={sentRequests}
             addFriendInput={addFriendInput}
@@ -169,10 +278,11 @@ export default function Sidebar({
             onCancelFriendRequest={onCancelFriendRequest}
             onStartChat={onStartChat}
             onRemoveFriend={onRemoveFriend}
+            onSelectFriend={onSelectFriend}
+            onSelectRequest={onSelectRequest}
           />
         )}
-      </div>
-    </div>
+      </section>
+    </>
   );
 }
-

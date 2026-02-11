@@ -70,15 +70,93 @@ export function useChat({
         allMessages.map(async (msg) => {
           try {
             const plaintext = await decryptMessage(msg.ciphertext, msg.nonce, key);
-            const profile = await pds.getProfile(msg.senderDid);
-            return {
+            
+            // 서버에서 프로필 정보 가져오기
+            const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+            let profile: any = { did: msg.senderDid, handle: msg.senderDid };
+            
+            try {
+              const profileResponse = await fetch(`${API_URL}/api/profile/${encodeURIComponent(msg.senderDid)}`);
+              if (profileResponse.ok) {
+                const profileData = await profileResponse.json();
+                if (profileData.success && profileData.profile) {
+                  profile = {
+                    did: msg.senderDid,
+                    displayName: profileData.profile.displayName || null,
+                    description: profileData.profile.description || null,
+                    avatarUrl: profileData.profile.avatarUrl || null,
+                    handle: null,
+                  };
+                }
+              }
+            } catch (error) {
+              console.warn("Failed to load profile from server:", error);
+            }
+            
+            // PDS에서 프로필 정보 가져오기 (handle 등 추가 정보)
+            try {
+              const pdsProfile = await pds.getProfile(msg.senderDid);
+              profile = {
+                ...profile,
+                did: msg.senderDid,
+                handle: pdsProfile.handle || profile.handle || null,
+                displayName: profile.displayName || pdsProfile.displayName || null,
+                description: profile.description || pdsProfile.description || null,
+                avatarUrl: profile.avatarUrl || pdsProfile.avatar || null,
+              };
+            } catch (error) {
+              console.warn("Failed to get profile from PDS:", error);
+            }
+            
+            const result = {
               ...msg,
               plaintext,
               decrypted: true,
               profile,
             };
+            // 디버깅: files 배열 확인
+            if (msg.files && msg.files.length > 0) {
+              console.log(`[useChat] Loaded message with ${msg.files.length} files:`, msg.uri, msg.files);
+            }
+            return result;
           } catch (error) {
-            const profile = await pds.getProfile(msg.senderDid).catch(() => ({ did: msg.senderDid, handle: msg.senderDid }));
+            // 서버에서 프로필 정보 가져오기
+            const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+            let profile: any = { did: msg.senderDid, handle: msg.senderDid };
+            
+            try {
+              const profileResponse = await fetch(`${API_URL}/api/profile/${encodeURIComponent(msg.senderDid)}`);
+              if (profileResponse.ok) {
+                const profileData = await profileResponse.json();
+                if (profileData.success && profileData.profile) {
+                  profile = {
+                    did: msg.senderDid,
+                    displayName: profileData.profile.displayName || null,
+                    description: profileData.profile.description || null,
+                    avatarUrl: profileData.profile.avatarUrl || null,
+                    handle: null,
+                  };
+                }
+              }
+            } catch (error) {
+              console.warn("Failed to load profile from server:", error);
+            }
+            
+            // PDS에서 프로필 정보 가져오기
+            try {
+              const pdsProfile = await pds.getProfile(msg.senderDid);
+              profile = {
+                ...profile,
+                did: msg.senderDid,
+                handle: pdsProfile.handle || profile.handle || null,
+                displayName: profile.displayName || pdsProfile.displayName || null,
+                description: profile.description || pdsProfile.description || null,
+                avatarUrl: profile.avatarUrl || pdsProfile.avatar || null,
+              };
+            } catch (error) {
+              console.warn("Failed to get profile from PDS:", error);
+            }
+            
             return {
               ...msg,
               plaintext: "[Decryption failed]",
@@ -110,6 +188,71 @@ export function useChat({
 
   const removeMessagesBySender = (senderDid: string) => {
     setMessages((prev) => prev.filter((msg) => msg.senderDid !== senderDid));
+  };
+
+  const updateProfileInMessages = async (updatedDid: string, profileData: { displayName?: string; description?: string; avatarUrl?: string }, pdsAdapter?: ClientPDSAdapter) => {
+    const currentPds = pdsAdapter || pds;
+    if (!currentPds) return;
+
+    try {
+      // 서버에서 최신 프로필 정보 가져오기
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const response = await fetch(`${API_URL}/api/profile/${encodeURIComponent(updatedDid)}`);
+      
+      let updatedProfile: any = null;
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.profile) {
+          updatedProfile = {
+            did: updatedDid,
+            displayName: data.profile.displayName || null,
+            description: data.profile.description || null,
+            avatarUrl: data.profile.avatarUrl || null,
+            handle: null, // 서버 프로필에는 handle이 없을 수 있음
+          };
+        }
+      }
+
+      // PDS에서도 프로필 정보 가져오기 (handle 등 추가 정보)
+      try {
+        const pdsProfile = await currentPds.getProfile(updatedDid);
+        updatedProfile = {
+          ...updatedProfile,
+          did: updatedDid,
+          handle: pdsProfile.handle || updatedProfile?.handle || null,
+          displayName: updatedProfile?.displayName || pdsProfile.displayName || null,
+          description: updatedProfile?.description || pdsProfile.description || null,
+          avatarUrl: updatedProfile?.avatarUrl || pdsProfile.avatar || null,
+        };
+      } catch (error) {
+        console.warn("Failed to get profile from PDS:", error);
+        // PDS 실패 시 서버 프로필만 사용
+        if (!updatedProfile) {
+          updatedProfile = {
+            did: updatedDid,
+            displayName: profileData.displayName || null,
+            description: profileData.description || null,
+            avatarUrl: profileData.avatarUrl || null,
+            handle: null,
+          };
+        }
+      }
+
+      // 메시지 목록에서 해당 사용자의 프로필 정보 업데이트
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.senderDid === updatedDid) {
+            return {
+              ...msg,
+              profile: updatedProfile || msg.profile,
+            };
+          }
+          return msg;
+        })
+      );
+    } catch (error) {
+      console.error("Failed to update profile in messages:", error);
+    }
   };
 
   const addMessageToState = async (msg: any, targetRoomId: string, pdsAdapter?: ClientPDSAdapter) => {
@@ -150,9 +293,39 @@ export function useChat({
         decrypted = false;
       }
 
-      let profile = { did: msg.senderDid, handle: msg.senderDid };
+      // 서버에서 프로필 정보 가져오기
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      let profile: any = { did: msg.senderDid, handle: msg.senderDid };
+      
       try {
-        profile = await currentPds.getProfile(msg.senderDid);
+        const profileResponse = await fetch(`${API_URL}/api/profile/${encodeURIComponent(msg.senderDid)}`);
+        if (profileResponse.ok) {
+          const profileData = await profileResponse.json();
+          if (profileData.success && profileData.profile) {
+            profile = {
+              did: msg.senderDid,
+              displayName: profileData.profile.displayName || null,
+              description: profileData.profile.description || null,
+              avatarUrl: profileData.profile.avatarUrl || null,
+              handle: null,
+            };
+          }
+        }
+      } catch (error) {
+        console.warn("Failed to load profile from server:", error);
+      }
+      
+      // PDS에서 프로필 정보 가져오기 (handle 등 추가 정보)
+      try {
+        const pdsProfile = await currentPds.getProfile(msg.senderDid);
+        profile = {
+          ...profile,
+          did: msg.senderDid,
+          handle: pdsProfile.handle || profile.handle || null,
+          displayName: profile.displayName || pdsProfile.displayName || null,
+          description: profile.description || pdsProfile.description || null,
+          avatarUrl: profile.avatarUrl || pdsProfile.avatar || null,
+        };
       } catch (error) {
         console.warn(`Failed to get profile for ${msg.senderDid}:`, error);
       }
@@ -163,6 +336,11 @@ export function useChat({
         decrypted,
         profile,
       };
+      
+      // 디버깅: files 배열 확인
+      if (msg.files && msg.files.length > 0) {
+        console.log(`[useChat] Adding message to state with ${msg.files.length} files:`, msg.uri, msg.files);
+      }
 
       setMessages((prev) => {
         if (prev.some((m) => m.uri === msg.uri)) return prev;
@@ -200,13 +378,38 @@ export function useChat({
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!pds || !roomId || !message.trim()) return;
+  const uploadFile = async (file: File): Promise<{ fileUrl: string; fileName: string; mimeType: string }> => {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch(`${API_URL}/api/files/upload`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: "Upload failed" }));
+      throw new Error(error.error || "Upload failed");
+    }
+
+    const result = await response.json();
+    return {
+      fileUrl: result.fileUrl,
+      fileName: result.fileName,
+      mimeType: result.mimeType,
+    };
+  };
+
+  const handleSendMessage = async (files?: Array<{ fileUrl: string; fileName: string; mimeType: string }>) => {
+    if (!pds || !roomId || (!message.trim() && (!files || files.length === 0))) return;
 
     try {
       const key = await roomKeyManager.getOrCreateRoomKey(roomId);
-      const { ciphertext, nonce } = await encryptMessage(message, key);
-      const recordUri = await pds.sendMessage(roomId, ciphertext, nonce);
+      // 메시지가 있으면 그대로 사용, 없으면 파일만 전송 (빈 메시지)
+      const messageText = message.trim() || "";
+      const { ciphertext, nonce } = await encryptMessage(messageText, key);
+      const recordUri = await pds.sendMessage(roomId, ciphertext, nonce, files);
 
       const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
       const pdsEndpoint = "https://bsky.social";
@@ -236,6 +439,13 @@ export function useChat({
           ciphertext,
           nonce,
           createdAt: now,
+          ...(files && files.length > 0 && { files }),
+          // 하위 호환성
+          ...(files && files.length === 1 && {
+            fileUrl: files[0].fileUrl,
+            fileName: files[0].fileName,
+            mimeType: files[0].mimeType,
+          }),
         }),
       });
 
@@ -247,9 +457,16 @@ export function useChat({
         createdAt: now,
         ciphertext,
         nonce,
-        plaintext: message,
+        plaintext: messageText,
         decrypted: true,
         profile: myProfile,
+        ...(files && files.length > 0 && { files }),
+        // 하위 호환성
+        ...(files && files.length === 1 && {
+          fileUrl: files[0].fileUrl,
+          fileName: files[0].fileName,
+          mimeType: files[0].mimeType,
+        }),
       };
 
       setMessages((prev) => {
@@ -316,6 +533,8 @@ export function useChat({
     loadMessages,
     addMessageToState,
     removeMessagesBySender,
+    updateProfileInMessages,
+    uploadFile,
     handleSendMessage,
     handleDeleteMessage,
   };
